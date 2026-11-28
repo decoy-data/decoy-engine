@@ -95,7 +95,7 @@ The FK key surface here is only `hash`, `redact`, `truncate`, `passthrough`.
 | `passthrough` | no-op | no-op |
 | `text_mask` | compiled span kernel for an admitted non-NER config on an exact-string source (`out_of_core/_text_mask_native.py`); NER configs and other sources stay on the dedicated Python per-cell loop | excluded (off the key surface) |
 | `code_set` (mask mode without `chapter_preserve`) | dedicated Python (no kernel on any route; backlog: Arrow dict-map) | excluded (off the key surface) |
-| `faker` (deterministic REUSE, exact-string, person-name provider) | compiled index selection | excluded (off the key surface) |
+| `faker` (deterministic REUSE, exact-string, native allowlist provider or computed `uuid` / string `random_choice`) | compiled index selection | excluded (off the key surface) |
 | `date_shift`, `bucketize` | declined (`out_of_core_row_error_strategy_unsupported`) | excluded (off the key surface) |
 | `categorical` (non-deterministic) | declined (`out_of_core_categorical_nondeterministic_unsupported`) | excluded (off the key surface) |
 | `geo_generalize` | declined (`out_of_core_whole_column_aggregation_unsupported`) | excluded (off the key surface) |
@@ -128,8 +128,9 @@ oracle (`tests/parity/test_phase_d_dmp_multi_parent_ooc*.py`); parents whose mas
 differ fail closed (`out_of_core_fk_key_dtype_unsupported`) and the router keeps such a job on
 the sequential route. Distinct child keys referencing different parents are supported as before.
 A-9 delivered the admitted composite and multi-parent FK shapes. It did not schedule OOC
-`date_shift`. OOC `faker` is admitted only for the deterministic-REUSE person-name variant on an
-exact-string source (see the `faker` qualification below); other faker shapes decline. Composite scalar children, composite chains, and unsupported key
+`date_shift`. OOC `faker` is admitted only for deterministic REUSE on an exact-string source, with a
+provider on the native faker allowlist or a deterministic computed draw (`uuid`, string
+`random_choice`); see the `faker` qualification below. Other faker shapes decline. Composite scalar children, composite chains, and unsupported key
 dtypes retain the restrictions above.
 
 OOC also declines when predicates, unsupported non-scalar work, self-referential relationships,
@@ -198,7 +199,7 @@ Each cell is further qualified by the guards below.
 | `categorical` | SEQ/OOC native selection requires deterministic mode, namespace, exact-string source, string categories, and a buildable weighted CDF. Seeded positional categorical is separately native on chunked. OOC rejects its non-deterministic mode. |
 | `bucket_perturb` | OOC requires explicit `date_format` at route admission. Native execution further requires exact string, namespace, supported bucket and format, no timezone or special pandas format, and valid preserve_values. Runtime range guards still apply. |
 | `date_shift` | Native SEQ/chunked requires exact string, namespace, explicit non-special timezone-free format (plan compile requires one, except for a top-level declared-casting column), no group_by, integer day bounds within the accepted range, and valid preserve_values. Main OOC rejects the entire strategy. |
-| `faker` | Providers are person_first_name and person_last_name on these native paths. SEQ admits exact string with deterministic REUSE or positional REUSE. Chunked additionally admits bool/integer deterministic REUSE with its fixed-schema producer guarantee and accepted conversion metadata. Positional bool/integer/float REUSE requires explicit pool_size. Other modes and providers use their existing Python path. OOC admits the deterministic-REUSE person-name variant with an exact-string source through the compiled index selection (run-scoped pool); other faker shapes, and a non-string source, decline. |
+| `faker` | Providers are the native faker allowlist (`provider_allowlist` in `execution/_operator_registry.py`) on these native paths. SEQ admits exact string with deterministic REUSE or positional REUSE. Chunked additionally admits bool/integer deterministic REUSE with its fixed-schema producer guarantee and accepted conversion metadata. Positional bool/integer/float REUSE requires explicit pool_size. Other modes and providers use their existing Python path. Computed draws with exact-string output (`uuid`, string `random_choice`) run natively on SEQ and OOC, as described in `docs/strategies.md`. Numeric computed draws (`random_int_range`, numeric or boolean `random_choice`) and all computed draws on chunked and unified stay on the Python path. OOC admits deterministic REUSE with an exact-string source through the compiled index selection (run-scoped pool); other faker shapes, and a non-string source, decline. |
 | `text_redact` / `text_mask` | Native paths have source/configuration guards. NER remains Python. OOC text_mask runs the compiled span kernel for an admitted non-NER config on an exact-string source (`out_of_core/_mask_group_c.py:224-227`); NER configs keep the dedicated loop, including batched NER inference. |
 | `code_set` | OOC admits mask mode without chapter_preserve. Gen mode and chapter_preserve remain route declines. There is no named Arrow code-set kernel on main. |
 | `group_key` | SEQ runs the raw-hex kernel when `decide_group_key` admits the column: the `group_by` sibling is present, is not the column itself, is unmasked and not an FK key or FK child, and has Arrow type string, int64 or bool (`_sequential_native_group_key.py:106-130`); anything else keeps the shared Python handler. Native chunked requires an exact string/int64/bool sibling, an unmasked non-self sibling, and valid even length in [8,64]. Unified full-frame also has a native implementation. |
@@ -220,7 +221,7 @@ These run their own Python handler by design, not the generic fallback:
   `tests/parity/test_out_of_core_group_c_parity.py`).
 - NER (the `ner` config of `text_redact` / `text_mask`): Python by design (spaCy inference).
 - `faker` masking runs as compiled index selection only on its native legs. Providers are
-  person_first_name and person_last_name on these native paths. SEQ admits an exact-`string`
+  providers on the native faker allowlist on these native paths. SEQ admits an exact-`string`
   source with deterministic REUSE or positional REUSE; chunked additionally admits bool/integer
   deterministic REUSE with its fixed-schema producer guarantee and accepted conversion metadata.
   It stays on its Python handler when the provider is not on the native allowlist, when a
@@ -228,8 +229,9 @@ These run their own Python handler by design, not the generic fallback:
   when a non-deterministic mode other than REUSE is used (UNIQUE, MATCH, and SCALE need
   whole-column RNG state), or when the source type is outside the native leg's domain. A faker
   column that stays on Python is still pool-backed: the handler builds and caches one value pool
-  and samples it, not per-row live-provider calls. OOC admits the
-  deterministic-REUSE person-name variant with an exact-string source through the
+  and samples it, not per-row live-provider calls. Exact-string computed draws (`uuid`, string
+  `random_choice`) run on SEQ and OOC under the same REUSE rules; see `docs/strategies.md`.
+  OOC admits deterministic REUSE with an exact-string source through the
   compiled index selection, drawing from a run-scoped pool; other faker shapes and
   a non-string source decline (`out_of_core_faker_pool_unsupported` at routing, or
   a fail-closed `out_of_core_faker_source_type_unsupported` for a non-string

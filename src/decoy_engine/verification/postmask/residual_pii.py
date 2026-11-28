@@ -49,6 +49,7 @@ from typing import Any
 
 import pandas as pd
 
+from decoy_engine import reasons
 from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
 from decoy_engine.internal.cell_identity import IdentityFailure
@@ -80,6 +81,7 @@ _WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"}
 # Strategies that leave the column untouched: a hit is the operator's choice, graded 'info'.
 # The cell is the source cell only when no other writer owns the column (`may_write`).
 _NO_OP_BY_DESIGN: frozenset[str] = frozenset({"passthrough"})
+_NOT_INSPECTABLE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
 
 # Strategies that REPLACE values per-cell: positional identity with the
 # source at scale means the mask did not fire. Mirrors the substitution
@@ -498,10 +500,25 @@ def residual_pii_findings(
             written = may_write(writes, table_name, col_name)
             # A passthrough leaves its cell alone only when nothing else writes the column.
             exempt = configured in _NO_OP_BY_DESIGN and not written
+            # A column the check could not read is not a clean one, whatever the strategy. It gets
+            # this one error finding; the text names the code only.
+            unread = _NOT_INSPECTABLE in (fact.identity_error, fact.distinct_error)
+            if unread:
+                findings.append(
+                    ResidualPIIFinding(
+                        table=table_name,
+                        column=col_name,
+                        detector_id="",
+                        match_rate=0.0,
+                        severity="error",
+                        message=f"column could not be inspected ({_NOT_INSPECTABLE}); "
+                        "a leak cannot be ruled out.",
+                    )
+                )
             if not fact.detectors:
                 # A comparison that raised on a column the run may have written is reported with
                 # no detector hit too: the check could not run.
-                if fact.identity_error is not None and written:
+                if fact.identity_error is not None and written and not unread:
                     findings.append(
                         ResidualPIIFinding(
                             table=table_name,
@@ -521,7 +538,7 @@ def residual_pii_findings(
             grade = _Grade(fact, configured, table_name in config_tables, rate)
             if rate is not None and fact.source_distinct_failed:
                 severity, message = grade.unknown_diversity()
-            elif rate is None and fact.identity_error is not None and not exempt:
+            elif rate is None and fact.identity_error is not None and not exempt and not unread:
                 # The comparison could not run, so the escalation this column may need is
                 # unknown. Say so at error severity rather than report a clean "not compared".
                 severity, message = "error", _compare_raised(top.detector_id, fact.identity_error)

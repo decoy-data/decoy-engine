@@ -160,7 +160,9 @@ def pass_through_label(node: ast.AST) -> str | None:
 
 
 def pass_through_sites() -> list[str]:
-    return scan(pass_through_label, "verification/postmask", "execution/pipeline/_post_scan.py")
+    return scan(
+        pass_through_label, "verification/postmask", "execution/pipeline/post_scan/_gate.py"
+    )
 
 
 # ----- one key core ---------------------------------------------------------------------------
@@ -184,7 +186,7 @@ def key_core_label(node: ast.AST) -> str | None:
 
 
 def key_core_sites() -> list[str]:
-    return scan(key_core_label, "verification", "execution/pipeline/_post_scan.py")
+    return scan(key_core_label, "verification", "execution/pipeline/post_scan/_gate.py")
 
 
 # ----- one reason-identity serializer ---------------------------------------------------------
@@ -211,7 +213,7 @@ def serializer_sites() -> list[str]:
 # ----- one applicability predicate ------------------------------------------------------------
 
 APPLIES_HOME = "decoy_engine/config/_post_scan.py::post_scan_gate_applies::"
-GATE = "execution/pipeline/_post_scan.py"
+GATE = "execution/pipeline/post_scan/_gate.py"
 
 
 def _reads(node: ast.AST, word: str) -> bool:

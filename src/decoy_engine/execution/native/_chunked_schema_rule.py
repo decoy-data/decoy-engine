@@ -294,7 +294,7 @@ def build_schema_rule(
     # C5c-ii: an admitted deterministic-Faker column over bool/int/uint pins its degenerate
     # output to `string` on both chunked legs, so the native leg (always `string`) and the
     # chunked oracle leg (pandas `null`/`double` for an all-null/empty chunk) agree.
-    strings |= deterministic_faker_pin_columns(config, table, first.schema)
+    strings |= deterministic_faker_pin_columns(config, table, first.schema, registry)
     strings |= date_shift_pinned_columns(configured, first.schema, table=table)
     strings |= when_pinned_columns(config, first.schema, table=table, registry=registry)
     strings |= group_key_pinned_columns(configured, first.schema, table=table, written=written)
@@ -315,15 +315,18 @@ def build_schema_rule(
 def _safe_cast(column: Any, target: pa.DataType, *, table: str, name: str, chunk_index: int) -> Any:
     try:
         return pc.cast(column, target, safe=True)
-    except (pa.ArrowInvalid, pa.ArrowNotImplementedError) as exc:
-        raise ExecutionError(
-            code=reasons.runtime.CHUNKED_SCHEMA_MISMATCH,
-            message=(
-                f"{table!r} chunk {chunk_index}: column {name!r} came back as "
-                f"{column.type} but every chunk of this call must be {target}, and the "
-                f"values cannot be converted without loss ({exc})"
-            ),
-        ) from exc
+    except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+        # Raised after the handler: pyarrow's text quotes the offending value, and a
+        # chained exception would carry it into any traceback.
+        pass
+    raise ExecutionError(
+        code=reasons.runtime.CHUNKED_SCHEMA_MISMATCH,
+        message=(
+            f"{table!r} chunk {chunk_index}: column {name!r} came back as "
+            f"{column.type} but every chunk of this call must be {target}, and the "
+            "values cannot be converted without loss"
+        ),
+    )
 
 
 def _narrow_passthrough(

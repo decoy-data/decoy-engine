@@ -35,9 +35,13 @@ human-readable message. Determinism contract mirrors PERF.BASE.2.
 from __future__ import annotations
 
 from decoy_engine.contracts.column_shape import NO_SOURCES, SourceFacts
+
+# Bound before `_compile`: the transforms import `refusal_error` from this package while it
+# initializes, and `_compile` loads them.
+from decoy_engine.plan._errors import PlanCompileError, refusal_error  # isort: skip
+
 from decoy_engine.plan._compile import _hash_config as pipeline_config_hash
 from decoy_engine.plan._compile import compile_plan, run_config_only_checks
-from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.plan._seed import job_seed_for_config
 from decoy_engine.plan._serialize import plan_from_yaml, plan_to_yaml
 from decoy_engine.plan._types import (
@@ -73,6 +77,7 @@ __all__ = [
     "pipeline_config_hash",
     "plan_from_yaml",
     "plan_to_yaml",
+    "refusal_error",
     "run_config_only_checks",
     "run_ner_models",
 ]

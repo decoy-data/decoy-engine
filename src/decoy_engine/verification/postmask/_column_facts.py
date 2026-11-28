@@ -29,6 +29,8 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
+from decoy_engine import reasons
+from decoy_engine._execution_error import ExecutionError, postmask_not_inspectable
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
 from decoy_engine.internal.cell_identity import (
     CellNotComparableError,
@@ -41,7 +43,7 @@ from decoy_engine.internal.cell_identity import (
     identity_facts,
 )
 from decoy_engine.internal.memory_limit import parse_megabytes
-from decoy_engine.internal.pandas_compat import exact_int_types_mapper
+from decoy_engine.internal.pandas_compat import arrow_to_series, exact_int_types_mapper
 from decoy_engine.plan.column_access import (
     TableWrites,
     config_child_keys,
@@ -220,9 +222,18 @@ class ColumnFacts:
 class _Tally:
     identity: IdentityFacts | None = None
     error: str | None = None
+    # True when the output column itself could not be read (no detectors, no values).
+    unreadable: bool = False
+    # Set when the output or source column could not be read. Separate from `error`, which a later
+    # length mismatch takes over, so the inspection failure is never lost.
+    not_inspectable: bool = False
     # detector id -> [hits, non-null values, threshold, name hint]
     detectors: dict[str, list[float | bool]] | None = None
     values: _ValueTally | None = None
+
+
+_NOT_INSPECTABLE_CODE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+_LENGTH_MISMATCH_CODE = reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
 
 
 def _column(batch: pa.RecordBatch, column: str) -> pa.Array:
@@ -231,26 +242,47 @@ def _column(batch: pa.RecordBatch, column: str) -> pa.Array:
 
 
 def _series(batch: pa.RecordBatch, column: str) -> pd.Series:
-    # The dtype comes from the schema, so a null in one batch cannot retype an integer column.
-    return _column(batch, column).to_pandas(types_mapper=exact_int_types_mapper)
+    """The output column as a series for the detectors. The dtype comes from the schema, so a null
+    in one batch cannot retype an integer column. A column pandas cannot hold raises the
+    `postmask_column_not_inspectable` error."""
+    return arrow_to_series(
+        _column(batch, column),
+        on_unrepresentable=postmask_not_inspectable,
+        types_mapper=exact_int_types_mapper,
+        name=column,
+    )
 
 
 def _aligned(
-    left: Iterator[pa.RecordBatch], right: Iterator[pa.RecordBatch]
-) -> Iterator[tuple[pa.RecordBatch, pa.RecordBatch]]:
-    """Pairs of batches of equal length covering both streams in order."""
+    left: Iterator[pa.RecordBatch],
+    right: Iterator[pa.RecordBatch],
+    on_length_mismatch: Callable[[], None],
+) -> Iterator[tuple[pa.RecordBatch | None, pa.RecordBatch]]:
+    """Pairs of batches of equal length covering both streams in order.
+
+    The right stream is the output: every one of its rows is yielded, with `None` for the source
+    batch once the source has ended, so no output row goes uninspected. When the two streams turn
+    out to differ in length, positional identity is meaningless and `on_length_mismatch` runs."""
     a = b = None
     while True:
-        if a is None or a.num_rows == 0:
+        while a is None or a.num_rows == 0:
             a = next(left, None)
-        if b is None or b.num_rows == 0:
+            if a is None:
+                break
+        while b is None or b.num_rows == 0:
             b = next(right, None)
-        if a is None or b is None:
-            # Exhaust both so the row-count check sees every row, not a prefix.
-            for _ in left:
+            if b is None:
+                break
+        if b is None:
+            if a is not None:
+                on_length_mismatch()
+            for _ in left:  # drain so the row-count check sees every source row
                 pass
-            for _ in right:
-                pass
+            return
+        if a is None:
+            on_length_mismatch()
+            yield None, b
+            yield from ((None, rest) for rest in right)
             return
         n = min(a.num_rows, b.num_rows)
         if n:
@@ -411,7 +443,17 @@ def column_facts(
     if aligned and source is not None and compared and identity is None:
         src_read, src_verify = _counted(source)
         checks.append(src_verify)
-        pairs = _aligned(src_read.read(compared, batch_rows), out_read.read(wanted, batch_rows))
+
+        def lengths_differ() -> None:
+            # Positional identity is void: fail closed on every compared column.
+            for c in compared:
+                tallies[c].error = _LENGTH_MISMATCH_CODE
+
+        pairs = _aligned(
+            src_read.read(compared, batch_rows),
+            out_read.read(wanted, batch_rows),
+            lengths_differ,
+        )
     else:
         if not (aligned and identity is not None):
             compared = []
@@ -427,10 +469,20 @@ def column_facts(
                 _add_identity(
                     tallies[c], compare_or_failure(_column(src_batch, c), _column(out_batch, c))
                 )
-            if c in refused:
-                # The table holds a placeholder for these cells; nothing reads it as data.
+            if c in refused or tallies[c].unreadable:
+                # A placeholder for refused cells, or a column a batch already showed is unreadable.
                 continue
-            _add_detectors(tallies[c], _series(out_batch, c), c)
+            try:
+                out_s = _series(out_batch, c)
+            except ExecutionError as exc:
+                if exc.code != _NOT_INSPECTABLE_CODE:
+                    raise
+                # An earlier comparison failure keeps `error`; the failure is recorded either way.
+                tallies[c].error = tallies[c].error or exc.code
+                tallies[c].not_inspectable = True
+                tallies[c].unreadable = True
+                continue
+            _add_detectors(tallies[c], out_s, c)
             values = tallies[c].values
             if values is not None:
                 values.add(_column(out_batch, c))
@@ -463,7 +515,10 @@ def column_facts(
             output_distinct=distinct[1],
             detectors=_fired(t),
             identity_error=t.error,
-            distinct_error=distinct_failed,
+            # The inspection code wins over a failed distinct count: the gate keys its
+            # unconditional residual-PII finding on it.
+            distinct_error=(_NOT_INSPECTABLE_CODE if t.not_inspectable else None)
+            or distinct_failed,
             source_distinct_failed=source_failed,
             output_values=t.values.done() if t.values is not None and c not in refused else None,
         )

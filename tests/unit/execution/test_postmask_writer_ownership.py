@@ -21,8 +21,8 @@ from decoy_engine.config import PipelineConfig
 from decoy_engine.execution import _pipeline_context as ctx_module
 from decoy_engine.execution import run_pipeline
 from decoy_engine.execution._strategies._passthrough import PassthroughHandler
-from decoy_engine.execution.pipeline import _post_scan as post_scan_module
 from decoy_engine.execution.pipeline import _routing_facts as facts_module
+from decoy_engine.execution.pipeline.post_scan import _gate as post_scan_module
 from decoy_engine.generation.composite import CompositeAdapter, composite_capability
 from decoy_engine.plan.column_access import (
     PASSTHROUGH_OUTPUT_IS_INPUT,

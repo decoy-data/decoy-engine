@@ -20,8 +20,7 @@ from tests.sentry.post_scan._scan import SRC, files
 
 SCOPE = (
     "verification",
-    "execution/pipeline/_post_scan.py",
-    "execution/pipeline/_post_scan_suite.py",
+    "execution/pipeline/post_scan",
     "detection",
     "internal/cell_text.py",
 )

@@ -193,7 +193,7 @@ def run_generate_and_mask_steps(
                 resident_names=tuple(merged_sources),
             )
             if out_mode == "streamed":
-                publish.open()
+                publish.start_streaming()
         if stream is not None and out_mode != "streamed":
             # The preflight admitted streaming; running resident now would break "must stream".
             raise ExecutionError(

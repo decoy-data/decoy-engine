@@ -154,15 +154,14 @@ def compile_expr(expr_string: str) -> CompiledExpression:
             else ""
         )
         raise ValidationError(
-            f"unsupported expression: {expr_string!r} is outside the closed "
+            f"unsupported expression{_position(exc)}: it is outside the closed "
             f"operator set. Only arithmetic (+,-,*,/,//), comparison "
             f"(==,!=,<,>,<=,>=,in), logical (and,or,not), concat() (n-arg, "
             f"two or more), slice(s, start[, end]), days_between(), "
             f"case_when(cond, val, ..., default), if(cond, val, other), if/else "
             f"ternary, literals, "
             f"and column references are allowed. Workaround: use a formula "
-            f"strategy for arbitrary Python expressions.{single_quote_hint} "
-            f"Detail: {exc}"
+            f"strategy for arbitrary Python expressions.{single_quote_hint}"
         ) from exc
     except RecursionError as exc:
         # Belt-and-suspenders: the depth bound above prevents most cases,
@@ -190,7 +189,7 @@ def compile_expr(expr_string: str) -> CompiledExpression:
     # M2: validate all string literal escape sequences at compile time
     # so a malformed escape fails immediately rather than crashing
     # per-row inside evaluate().
-    _validate_string_escapes(tree, expr_string)
+    _validate_string_escapes(tree)
 
     # ``if(c, a, b)`` is sugar for the ternary: every reader of the tree
     # (evaluator, column-ref walk, numeric typing) sees one conditional kind.
@@ -222,7 +221,19 @@ def _rewrite_if_calls(tree: lark.Tree[Any]) -> None:
             subtree.children = [then, cond, other]
 
 
-def _validate_string_escapes(tree: lark.Tree[Any], source: str) -> None:
+def _position(item: object) -> str:
+    """`` at line L, column C`` from a lark error's or token's integer position, else ``""``.
+
+    Only the two integers are read, never the text, so a message can point at the
+    offending spot without quoting the expression.
+    """
+    line, column = getattr(item, "line", None), getattr(item, "column", None)
+    if type(line) is int and type(column) is int:
+        return f" at line {line}, column {column}"
+    return ""
+
+
+def _validate_string_escapes(tree: lark.Tree[Any]) -> None:
     """Validate escape sequences in all string literals in *tree*.
 
     Walks the parse tree and attempts to decode each string token using
@@ -232,19 +243,23 @@ def _validate_string_escapes(tree: lark.Tree[Any], source: str) -> None:
     """
     for subtree in tree.iter_subtrees():
         if subtree.data == "string_lit":
-            raw = str(subtree.children[0])
-            content = raw[1:-1]  # strip surrounding double-quote chars
+            token = subtree.children[0]
+            content = str(token)[1:-1]  # strip surrounding double-quote chars
             try:
                 content.encode("raw_unicode_escape").decode("unicode_escape")
-            except (UnicodeDecodeError, ValueError) as exc:
+                bad_escape = False
+            except (UnicodeDecodeError, ValueError):
+                bad_escape = True
+            if bad_escape:
+                # Raised outside the except block: the decode error holds the literal's text in
+                # `.object`, and an implicit `__context__` would carry it to every error surface.
                 raise ValidationError(
-                    f"invalid string escape sequence in {raw!r} "
-                    f"(in expression {source!r}): {exc}. "
+                    f"invalid string escape sequence in a string literal{_position(token)}. "
                     f"Check that all backslash sequences are valid "
                     f"(e.g. \\\\n, \\\\t, \\\\\\\\, \\\\uXXXX). "
                     f"Raw Windows paths such as C:\\\\xyz should escape "
                     f"the backslash (C:\\\\\\\\xyz) or use forward slashes."
-                ) from exc
+                )
 
 
 def evaluate(compiled: CompiledExpression, row_context: dict[str, Any]) -> Any:

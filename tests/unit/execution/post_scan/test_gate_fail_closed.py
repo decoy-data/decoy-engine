@@ -25,8 +25,8 @@ import pytest
 from decoy_engine import run_pipeline
 from decoy_engine.config import PipelineConfig, PipelineConfigError
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline import _post_scan
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 from decoy_engine.verification.postmask import (
     SCHEMA_VERSION,
     PostScanBlockedError,
@@ -98,15 +98,15 @@ def _contact_fault(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Make the identity comparison raise for the `contact` batch only (found by its source
     fixture), with a value-bearing message, and delegate every other call."""
     fired: list[str] = []
-    real = _column_facts._add_identity
+    real = _column_facts.identity_facts
 
-    def add(tally: Any, src: pd.Series, out: pd.Series) -> None:
-        if CONTACT[0] in set(src.astype(object).tolist()):
+    def compare(src: Any, out: Any) -> Any:
+        if CONTACT[0] in set(src.tolist()):
             fired.append("contact")
             raise RuntimeError(f"cannot compare {CONTACT[0]} {MARK}")
-        real(tally, src, out)
+        return real(src, out)
 
-    monkeypatch.setattr(_column_facts, "_add_identity", add)
+    monkeypatch.setattr(_column_facts, "identity_facts", compare)
     return fired
 
 

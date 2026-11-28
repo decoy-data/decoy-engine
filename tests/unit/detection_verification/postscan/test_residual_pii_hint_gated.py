@@ -12,6 +12,7 @@ import re
 import pandas as pd
 import pytest
 
+from decoy_engine import reasons
 from decoy_engine.verification.postmask._column_facts import (
     ColumnFacts,
     DetectorRate,
@@ -155,6 +156,20 @@ def test_identity_error_is_still_an_error():
     bad = facts["t"]["customer_id"]
     facts["t"]["customer_id"] = ColumnFacts(**{**bad.__dict__, "identity_error": "ValueError"})
     assert _one(_findings(facts, _cfg("redact"))).severity == "error"
+
+
+def test_a_source_that_cannot_be_read_gives_one_error_finding_for_the_column():
+    # `postmask_column_not_inspectable` on the source side: the first branch already reports the
+    # column, so the identity-error branch must not add a second error finding.
+    facts = _facts(identical=0, comparable=0)
+    bad = facts["t"]["customer_id"]
+    facts["t"]["customer_id"] = ColumnFacts(
+        **{**bad.__dict__, "identity_error": reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE}
+    )
+    findings = residual_pii_findings(facts, _cfg("redact"))
+    errors = [f for f in findings if f.severity == "error"]
+    assert len(errors) == 1
+    assert reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE in errors[0].message
 
 
 def test_frame_route_on_demo_shaped_frame_is_info():

@@ -22,12 +22,14 @@ from typing import TYPE_CHECKING, Any, Final
 import numpy as np
 import pyarrow as pa
 
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.execution import _unified_slice_admission as _admission
 from decoy_engine.execution._operator_registry import OPERATORS
 from decoy_engine.execution._unified_slice import UnifiedSliceInvariantError
 from decoy_engine.execution.native import _chunked_evidence
 from decoy_engine.execution.native._operator_params import FakerParams
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
+from decoy_engine.internal.pandas_compat import arrow_to_series
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping
@@ -215,7 +217,13 @@ def reconstruct_source_shaped_output(
         if node.execution is not None and node.execution.when_expression is not None:
             _write_back_when(frame, column, masked_col, _when_mask_of(node, when_selected))
             continue
-        frame[column] = masked_col.to_pandas() if empty else masked_col.to_pylist()
+        frame[column] = (
+            arrow_to_series(
+                masked_col, on_unrepresentable=source_column_unrepresentable(), name=column
+            )
+            if empty
+            else masked_col.to_pylist()
+        )
     from decoy_engine.execution._faker_degenerate_pin import pin_degenerate_to_string
 
     # C5c-ii option A: an all-null/empty admitted deterministic-Faker column over bool/int/uint is

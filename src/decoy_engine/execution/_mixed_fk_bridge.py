@@ -261,7 +261,7 @@ def _write_back_fk_column(
     column, since pandas->Arrow schema inference is column-local.
     """
     one_column = pa.table({child_column: child_table.column(child_column)})
-    frame = to_pandas_fk_safe(one_column, {child_column})
+    frame = to_pandas_fk_safe(one_column, {child_column}, table_name=table_name)
     safe_ints = lossless_fk_int_values(values)
     if safe_ints is not None and all(v is None for v in safe_ints):
         frame[child_column] = fk_all_null_array(len(safe_ints), frame[child_column].dtype)

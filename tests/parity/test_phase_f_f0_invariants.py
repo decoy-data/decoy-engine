@@ -639,11 +639,13 @@ def test_restarted_selection_stream_is_caught_through_the_seam(
 ) -> None:
     """Mutate the persistent pooled selector so each batch re-creates `default_rng(seed)` (the
     batch-local stream restart), with the 50_000-row fixture forced into two batches."""
-    real_select = _faker_pool.PooledSelector.select
 
-    def restarting(self: _faker_pool.PooledSelector, size: int) -> Any:
-        self._rng = np.random.default_rng(self._seed_int)
-        return real_select(self, size)
+    def restarting(real: Any) -> Any:
+        def pick(self: _faker_pool.PooledSelector, size: int) -> Any:
+            self._rng = np.random.default_rng(self._seed_int)
+            return real(self, size)
+
+        return pick
 
     real_init = _faker_pool.PooledSelector.__init__
 
@@ -652,7 +654,10 @@ def test_restarted_selection_stream_is_caught_through_the_seam(
         self._seed_int = int.from_bytes(selection_seed, "big")
 
     monkeypatch.setattr(_faker_pool.PooledSelector, "__init__", init)
-    monkeypatch.setattr(_faker_pool.PooledSelector, "select", restarting)
+    for name in _faker_pool.PooledSelector.PICK_METHODS:
+        monkeypatch.setattr(
+            _faker_pool.PooledSelector, name, restarting(getattr(_faker_pool.PooledSelector, name))
+        )
     monkeypatch.setattr(_streamed, "DEFAULT_BATCH_ROWS", 20_000)
     _trips(
         lambda: assert_matches_oracle("pooled_faker", fx.FIXTURES_BY_ID["pooled_faker"].run()),
@@ -701,7 +706,8 @@ def test_perturbed_parent_keys_are_caught(monkeypatch: pytest.MonkeyPatch) -> No
     # the tables. The gate's own duplicate-key block is pinned in
     # tests/unit/execution/post_scan/test_wiring.py, so the gate is off for this oracle check.
     monkeypatch.setattr(
-        "decoy_engine.execution.pipeline._post_scan.post_scan_gate_applies", lambda config: False
+        "decoy_engine.execution.pipeline.post_scan._gate.post_scan_gate_applies",
+        lambda config: False,
     )
     # The fixture's parent key is `unique: true`, so it is drawn by the unique categorical sampler.
     monkeypatch.setattr(

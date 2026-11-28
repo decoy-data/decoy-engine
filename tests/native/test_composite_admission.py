@@ -656,8 +656,12 @@ def test_a_read_when_column_still_raises_for_an_unrepresentable_value() -> None:
     with pytest.raises(Exception) as ours:
         next(gen)
     assert getattr(ours.value, "code", None) == "chunked_passthrough_value_unrepresentable"
-    with pytest.raises(pa.ArrowInvalid):
+    # The public (oracle) leg converts the whole source to pandas and fails with its own coded,
+    # value-free error rather than pyarrow's raw one, which quotes the cell.
+    with pytest.raises(Exception) as oracle:
         run_public_below_gate(_when_config(_READ_T), chunks)
+    assert getattr(oracle.value, "code", None) == "full_frame_value_unrepresentable"
+    assert oracle.value.__cause__ is None
 
 
 def test_a_when_does_not_refuse_an_unrelated_stored_index() -> None:

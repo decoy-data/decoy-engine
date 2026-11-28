@@ -349,7 +349,9 @@ def cheap_admission(
     try:
         # Declared integers, group_key siblings and the columns a `when:` reads stay exact on the
         # oracle, so they must here too (one construction, shared with the adapter).
-        frame = to_pandas_fk_safe(source, lossless_int_columns_from_config(config, table, source))
+        frame = to_pandas_fk_safe(
+            source, lossless_int_columns_from_config(config, table, source), table_name=table
+        )
     except Exception:
         # Total-to-decline: any Arrow->pandas failure declines to the legacy
         # route rather than raising a different error than legacy's own coded

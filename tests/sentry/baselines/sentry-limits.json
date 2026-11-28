@@ -1,0 +1,50 @@
+{
+ "sentry_id": "sentry-limits",
+ "created_in": "RG-E2",
+ "entries": {
+  "_ratchet.py::MIN_REASON": {
+   "reason": "shortest reason or decision text the ratchet accepts; a lower value lets a thin reason pass",
+   "min": 15
+  },
+  "defects/test_faker_native_allowlist_total.py::MIN_COPY": {
+   "reason": "smallest literal holding allowlisted names that the total sentry flags; a higher value lets copies of the allowlist pass",
+   "max": 3
+  },
+  "dependencies/_faker_lock_lists.py::EN_US_DIGEST_FLOOR": {
+   "reason": "floor on the en_US digest pairs the faker output lock checks; a lower floor lets the lock shrink unnoticed",
+   "min": 253
+  },
+  "layout/test_package_fanout.py::LIMIT": {
+   "reason": "direct-module cap per package; a higher cap lets every package hold more modules",
+   "max": 25
+  },
+  "release/test_public_census.py::MIN_NAMES": {
+   "reason": "floor on the public names the export census walks; a lower floor lets the walk shrink unnoticed",
+   "min": 1186
+  },
+  "release/test_public_census.py::MIN_PACKAGES": {
+   "reason": "floor on the public packages the export census walks; a lower floor lets the walk skip a package unnoticed",
+   "min": 59
+  },
+  "release/test_public_signatures.py::HEAD_FLOOR": {
+   "reason": "floor on the public names the signature census maps; a lower floor lets the census shrink unnoticed",
+   "min": 350
+  },
+  "test_module_size.py::GOAL": {
+   "reason": "line count at or under which a module needs no module-size allowlist row; a higher goal loosens every entry",
+   "max": 600
+  },
+  "test_module_size.py::MARGIN": {
+   "reason": "headroom a fresh dense pin starts with; a higher margin lets a ceiling sit above its module",
+   "max": 20
+  },
+  "test_module_size.py::MAX": {
+   "reason": "hard line ceiling for new work; a higher value lets a module grow past the reviewed cap",
+   "max": 700
+  },
+  "test_outbound_clients.py::WALK_FLOOR": {
+   "reason": "floor on the files the outbound-client walk sees; a lower floor lets the walk shrink unnoticed",
+   "min": 146
+  }
+ }
+}

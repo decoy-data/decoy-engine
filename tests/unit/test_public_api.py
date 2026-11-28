@@ -35,6 +35,9 @@ def test_all_lists_every_public_name():
         # Transforms are engine-owned: callers that use the plan-level APIs (which
         # take prepared inputs) apply a table's transforms through this helper.
         "apply_table_transforms",
+        "arrow_to_frame",
+        "arrow_to_frame_pair",
+        "arrow_to_series",
         "composite_address",
         "composite_custom",
         "composite_name_email",
@@ -92,7 +95,6 @@ def test_all_lists_every_public_name():
         "ExecutionContext",
         "Logger",
         "StructuredEvents",
-        "TelemetryClient",
         "emit_step",
         "emit_lineage",
         "emit_fidelity",
@@ -117,7 +119,6 @@ def test_all_lists_every_public_name():
         "RetryEvent",
         "RetryInfo",
         "event_to_dict",
-        "event_to_legacy_dict",
         "reason_from_exception",
         "reasons_from_report",
         # S22-CL-V1GRAPHRUNNER (2026-05-30): removed validate_graph,
@@ -213,7 +214,6 @@ def test_all_lists_every_public_name():
         # engine-v2 S9 (Execution Adapter, pandas).
         "ExecutionAdapter",
         "ExecutionError",
-        "ExecutionEvent",
         "ExecutionResult",
         "PandasExecutionAdapter",
         "StrategyError",
@@ -412,7 +412,6 @@ class TestExecutionContext:
     def test_default_construction(self):
         ctx = ExecutionContext()
         assert ctx.logger is None
-        assert ctx.telemetry is None
 
     def test_logger_injection(self):
         log = logging.getLogger("decoy_engine.test")
