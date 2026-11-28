@@ -78,7 +78,7 @@ def main() -> None:
                 "profile": _profile_dict(dataclasses.replace(profile, row_count_exact=True))
             }
         except Exception as exc:
-            reply = {"raises": type(exc).__name__}
+            reply = {"raises": type(exc).__name__, "code": getattr(exc, "code", None)}
         pickle.dump(reply, out)
         out.flush()
 

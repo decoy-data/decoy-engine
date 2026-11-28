@@ -59,9 +59,10 @@ def test_at5_a_failed_recovery_reports_a_closed_label_and_no_chain(
 ) -> None:
     table = _marker_table()
     reader = make_reader("local", table, parquet_bytes(table), tmp_path, monkeypatch)
-    with pytest.raises(ValueError) as caught:
+    # #799: a decimal companion declines recovery; the failure is the coded, value-free error.
+    with pytest.raises(ExecutionError) as caught:
         bounded_profile(reader, "local")
-    assert str(caught.value) == "bounded source profile failed (Exception)"
+    assert caught.value.code == "source_column_unrepresentable"
     assert caught.value.__cause__ is None and caught.value.__context__ is None
     assert MARKER not in _formatted(caught.value)
 
@@ -92,9 +93,9 @@ def test_at5_capacity_hides_the_value_and_keeps_the_code(tmp_path: Path) -> None
     }
     with pytest.raises(ExecutionError) as caught:
         estimate_job_capacity(config, tmp_path)
-    assert caught.value.code == "capacity_source_unprofilable"
+    # Main's capacity path lets this coded failure through as it does for any source read.
+    assert caught.value.code == "source_column_unrepresentable"
     assert MARKER not in _formatted(caught.value)
-    assert "bounded source profile failed (Exception)" in str(caught.value)
 
 
 class _RaisingReader:
@@ -260,12 +261,11 @@ def test_at8_a_resident_table_with_a_stored_index_and_a_bad_time(
         }
     ).replace_schema_metadata(base.schema.metadata)
     good = bad.set_column(1, "t", pa.array([1000, 2000, 3000], pa.time64("ns")))
-    assert_matches_base(bad, "resident", tmp_path, monkeypatch)
-    profile = bounded_profile(make_reader("resident", bad, b"", tmp_path, monkeypatch), "resident")
-    assert [c.name for c in profile.columns] == ["v", "t", "k"]
-    v, t, k = (_column(profile, n) for n in "vtk")
-    assert (v.dtype, v.null_count, v.distinct_count) == ("float64", 1, 1)
-    assert (t.avg_length, t.max_length, k.distinct_count) == (18.0, 18, 3)
+    # #799: a resident column pandas cannot hold is the one coded error, as on the merge base.
+    assert not assert_matches_base(bad, "resident", tmp_path, monkeypatch)
+    with pytest.raises(ExecutionError) as caught:
+        bounded_profile(make_reader("resident", bad, b"", tmp_path, monkeypatch), "resident")
+    assert caught.value.code == "source_column_unrepresentable" and caught.value.column == "t"
     twin = bounded_profile(make_reader("resident", good, b"", tmp_path, monkeypatch), "resident")
     assert [c.name for c in twin.columns] == ["v", "t"]  # the stored index stays hidden
     assert (_column(twin, "v").dtype, _column(twin, "v").distinct_count) == ("Int64", 2)
@@ -372,8 +372,9 @@ def test_at3c_pandas_metadata_never_enters_recovery(
     assert _profile(twin, "local", tmp_path, monkeypatch).columns  # the twin converts whole
     read_back = pq.ParquetFile(io.BytesIO(parquet_bytes(bad))).schema_arrow
     assert b"pandas" in (read_back.metadata or {})
-    with pytest.raises(ValueError, match=SAFE_FAILURE):
+    with pytest.raises(ExecutionError) as caught:
         _profile(bad, "local", tmp_path, monkeypatch)
+    assert caught.value.code == "source_column_unrepresentable"
 
 
 # ------------------------------------------------------------------ AT-12: period and float
@@ -391,20 +392,19 @@ def test_at12_a_period_with_a_bad_frequency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     table = _canary_period()
-    resident = bounded_profile(
-        make_reader("resident", table, b"", tmp_path, monkeypatch), "resident"
-    )
-    p = _column(resident, "p")
-    assert (p.dtype, p.distinct_count, p.avg_length, p.max_length) == ("object", 2, 1.0, 1)
-    assert_matches_base(table, "resident", tmp_path, monkeypatch)
+    with pytest.raises(ExecutionError) as resident:
+        bounded_profile(make_reader("resident", table, b"", tmp_path, monkeypatch), "resident")
+    assert resident.value.code == "source_column_unrepresentable"
+    assert "BAD-CANARY" not in _formatted(resident.value)
+    assert not assert_matches_base(table, "resident", tmp_path, monkeypatch)
     try:
         data = parquet_bytes(table)
     except (pa.ArrowNotImplementedError, pa.ArrowInvalid, pa.ArrowTypeError):
         pytest.skip("this stack cannot write the extension type to Parquet")
     reader = make_reader("local", table, data, tmp_path, monkeypatch)
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ExecutionError) as caught:
         bounded_profile(reader, "local")
-    assert str(caught.value) == "bounded source profile failed (ValueError)"
+    assert caught.value.code == "source_column_unrepresentable"
     assert "BAD-CANARY" not in _formatted(caught.value)
     assert caught.value.__cause__ is None and caught.value.__context__ is None
 
@@ -476,6 +476,8 @@ def test_at14_a_resident_dictionary_in_two_chunks_uses_the_base_reader(
     first = _dictionary(pa.int32(), pa.array(["a", None]), [0, 1])
     second = _dictionary(pa.int32(), pa.array(["c", "d"]), [1, 0])
     table = pa.table({"x": pa.chunked_array([first, second])})
-    assert assert_matches_base(table, "resident", tmp_path, monkeypatch)
-    x = _column(_profile(table, "resident", tmp_path, monkeypatch), "x")
-    assert (x.dtype, x.null_count, x.distinct_count) == ("object", 1, 3)
+    # #799: pandas cannot hold this two-chunk dictionary, so base and branch give the coded error.
+    assert not assert_matches_base(table, "resident", tmp_path, monkeypatch)
+    with pytest.raises(ExecutionError) as caught:
+        _profile(table, "resident", tmp_path, monkeypatch)
+    assert caught.value.code == "source_column_unrepresentable" and caught.value.column == "x"

@@ -16,11 +16,12 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.profile import _source
 from decoy_engine.profile.arrow import _recovery
 from tests.unit.profile.arrow_profile.support import (
     PARQUET_KINDS,
-    SAFE_FAILURE,
+    BaseRaisedError,
     assert_matches_base,
     base_profile,
     bounded_profile,
@@ -264,10 +265,11 @@ def test_at3_zero_rows_and_table_level_fields(
 
 def test_at3_time64_ns_counts_one_to_five(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     table = pa.table({"t": pa.array([1, 2, 3, 4, 5], pa.time64("ns"))})
-    # A resident table is text on base; Parquet raises on base and recovers.
-    resident = base_profile("resident", table, b"")
-    assert _column(resident, "t").dtype == "object"
-    assert_matches_base(table, "resident", tmp_path, monkeypatch)
+    # Base now raises the coded error for a resident table (#799) and for Parquet; only the
+    # flat Parquet schema recovers.
+    with pytest.raises(BaseRaisedError):
+        base_profile("resident", table, b"")
+    assert not assert_matches_base(table, "resident", tmp_path, monkeypatch)
     recovered = _profile(table, "local", tmp_path, monkeypatch)
     assert _column(recovered, "t").distinct_count == 5
     holdable = pa.table({"t": pa.array([1000, 2000, 3000, 4000, 5000], pa.time64("ns"))})
@@ -321,8 +323,9 @@ def test_at4_an_ineligible_failure_never_profiles_from_arrow(
 
     spy = _Spy(monkeypatch)
     table = pa.table({"t": _times(), "dec": pa.array([decimal.Decimal("1.5")] * 4)})
-    with pytest.raises(ValueError, match=SAFE_FAILURE):
+    with pytest.raises(ExecutionError) as caught:
         _profile(table, "local", tmp_path, monkeypatch)
+    assert caught.value.code == "source_column_unrepresentable"
     assert spy.arrow == []
 
 
@@ -336,7 +339,7 @@ class _BrokenTable:
     def __len__(self) -> int:
         return self.num_rows
 
-    def to_pandas(self) -> Any:
+    def to_pandas(self, **_kw: Any) -> Any:
         raise KeyError("MARKER-CELL")
 
 
@@ -432,8 +435,9 @@ def test_an_out_of_day_time_beside_a_fractional_one_is_refused(
 ) -> None:
     day = 86_400_000_000_000
     table = pa.table({"t": pa.array([1, 2000, day + 5, 3000], pa.time64("ns")), "e": EMAILS})
-    with pytest.raises(ValueError, match=SAFE_FAILURE):
+    with pytest.raises(ExecutionError) as caught:
         _profile(table, kind, tmp_path, monkeypatch)
+    assert caught.value.code == "source_column_unrepresentable"
 
 
 # ------------------------------------------------------------------ the S1a column profile

@@ -19,6 +19,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import fileaccess, reason_adapter
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.fileaccess import FileRole, Root, RootedFileAccess
 from decoy_engine.fileaccess._openat2 import openat2_usable
 from tests.unit.profile.arrow_profile.support import bounded_profile
@@ -32,6 +33,14 @@ def _leaky() -> pa.ArrowInvalid:
 
 def _formatted(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc)) + repr(exc) + str(exc)
+
+
+class _FailingColumn:
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def to_pandas(self, **_kw: Any) -> Any:
+        raise self._exc
 
 
 class _FailingTable:
@@ -51,7 +60,7 @@ class _FailingTable:
     def num_rows(self) -> int:
         return self._inner.num_rows
 
-    def to_pandas(self) -> Any:
+    def to_pandas(self, **_kw: Any) -> Any:
         raise self._whole
 
     def select(self, names: list[str]) -> Any:
@@ -59,7 +68,13 @@ class _FailingTable:
             return self._inner.select(names)
         return _FailingTable(self._inner.select(names), self._column, None)
 
+    @property
+    def column_names(self) -> list[str]:
+        return self._inner.column_names
+
     def column(self, index: int) -> Any:
+        if self._column is not None:
+            return _FailingColumn(self._column)
         return self._inner.column(index)
 
 
@@ -102,7 +117,7 @@ def _assert_classified(exc: BaseException, original: BaseException) -> None:
 def test_a_memory_failure_from_the_whole_table_conversion_is_classified() -> None:
     leaky = _leaky()
     with pytest.raises(pa.ArrowInvalid) as caught:
-        bounded_profile(_reader(leaky, None), "local")
+        bounded_profile(_reader(leaky, None, temporal=False), "local")
     _assert_classified(caught.value, leaky)
 
 
@@ -114,9 +129,12 @@ def test_a_memory_failure_from_a_column_conversion_is_classified() -> None:
 
 
 def test_an_ordinary_conversion_failure_is_still_a_label() -> None:
-    with pytest.raises(ValueError) as caught:
+    # #799: a whole-sample failure no single column reproduces is the coded, value-free error.
+    with pytest.raises(ExecutionError) as caught:
         bounded_profile(_reader(ValueError(MARKER), None, temporal=False), "local")
-    assert str(caught.value) == "bounded source profile failed (ValueError)"
+    assert caught.value.code == "source_column_unrepresentable"
+    assert MARKER not in _formatted(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
 @pytest.fixture
@@ -143,7 +161,7 @@ def test_a_memory_failure_is_classified_under_a_strict_policy(
     policy, _ = rooted
     leaky = _leaky()
     with fileaccess.scope(policy), pytest.raises(pa.ArrowInvalid) as caught:
-        bounded_profile(_reader(leaky, None), "local")
+        bounded_profile(_reader(leaky, None, temporal=False), "local")
     _assert_classified(caught.value, leaky)
 
 

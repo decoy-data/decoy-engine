@@ -72,28 +72,34 @@ def _quoted_period(freq: str = ENVELOPE) -> pa.Table:
     return pa.table({"p": pa.ExtensionArray.from_storage(ArrowPeriodType(freq), storage)})
 
 
+def _assert_coded_value_free(exc: BaseException, column: str) -> None:
+    """#799's one source read: the coded error names the column and quotes nothing."""
+    assert isinstance(exc, ExecutionError)
+    assert exc.code == "source_column_unrepresentable"
+    assert not fileaccess.is_memory_failure(exc)
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert ENVELOPE not in _formatted(exc) and MARKER not in _formatted(exc)
+    assert exc.column == column
+
+
 def test_a_resident_period_frequency_quoting_the_openssl_text_is_not_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     table = _quoted_period()
-    # The resident fallback profiles the column as text, as the base does (AT-12 pins the same
-    # profile for another frequency text against the recorded base).
-    resident = bounded_profile(
-        make_reader("resident", table, b"", tmp_path, monkeypatch), "resident"
-    )
-    p = _column(resident, "p")
-    assert (p.dtype, p.distinct_count, p.avg_length, p.max_length) == ("object", 2, 1.0, 1)
+    reader = make_reader("resident", table, b"", tmp_path, monkeypatch)
+    with pytest.raises(ExecutionError) as caught:
+        bounded_profile(reader, "resident")
+    _assert_coded_value_free(caught.value, "p")
 
 
 def test_a_resident_period_frequency_quoting_the_arrow_text_is_not_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     table = _quoted_period("Unknown error: Wrapping x failed")
-    resident = bounded_profile(
-        make_reader("resident", table, b"", tmp_path, monkeypatch), "resident"
-    )
-    p = _column(resident, "p")
-    assert (p.dtype, p.distinct_count, p.avg_length, p.max_length) == ("object", 2, 1.0, 1)
+    reader = make_reader("resident", table, b"", tmp_path, monkeypatch)
+    with pytest.raises(ExecutionError) as caught:
+        bounded_profile(reader, "resident")
+    _assert_coded_value_free(caught.value, "p")
 
 
 def test_a_parquet_period_frequency_quoting_the_openssl_text_is_a_label(
@@ -105,10 +111,9 @@ def test_a_parquet_period_frequency_quoting_the_openssl_text_is_a_label(
     except (pa.ArrowNotImplementedError, pa.ArrowInvalid, pa.ArrowTypeError):
         pytest.skip("this stack cannot write the extension type to Parquet")
     reader = make_reader("local", table, data, tmp_path, monkeypatch)
-    with pytest.raises(ValueError, match=SAFE_FAILURE) as caught:
+    with pytest.raises(ExecutionError) as caught:
         bounded_profile(reader, "local")
-    assert not fileaccess.is_memory_failure(caught.value)
-    assert ENVELOPE not in _formatted(caught.value)
+    _assert_coded_value_free(caught.value, "p")
 
 
 class _Failing:
@@ -119,37 +124,33 @@ class _Failing:
         self.columns = [self]
         self.column_names = ["a"]
 
-    def to_pandas(self) -> Any:
+    def to_pandas(self, **_kw: Any) -> Any:
         raise self._exc
 
+    def column(self, index: int) -> Any:
+        return self.columns[index]
 
-@pytest.mark.parametrize(
-    "exc",
-    [
-        pa.ArrowInvalid(f"Unknown error: Wrapping {MARKER} failed"),
-        ValueError(f"Unknown error: Wrapping {MARKER} failed"),
-    ],
-)
-def test_a_genuine_arrow_memory_failure_still_stops_the_resident_fallback(
-    exc: BaseException,
-) -> None:
-    with pytest.raises(type(exc)) as caught:
+
+def test_a_genuine_arrow_memory_failure_still_stops_the_resident_conversion() -> None:
+    exc = pa.ArrowMemoryError(f"malloc of size {MARKER} failed")
+    with pytest.raises(pa.ArrowMemoryError) as caught:
         _frame_of(_Failing(exc))  # type: ignore[arg-type]
-    assert caught.value is exc
+    assert MARKER not in _formatted(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
-def test_a_genuine_arrow_memory_failure_stops_the_column_fallback() -> None:
+def test_a_genuine_arrow_memory_failure_stops_the_column_probe() -> None:
     whole = ValueError("not memory")
-    leaky = pa.ArrowInvalid(f"Unknown error: Wrapping {MARKER} failed")
+    leaky = pa.ArrowMemoryError(f"malloc of size {MARKER} failed")
 
     class _Table(_Failing):
         def __init__(self) -> None:
             super().__init__(whole)
             self.columns = [_Failing(leaky)]
 
-    with pytest.raises(pa.ArrowInvalid) as caught:
+    with pytest.raises(pa.ArrowMemoryError) as caught:
         _frame_of(_Table())  # type: ignore[arg-type]
-    assert caught.value is leaky
+    assert MARKER not in _formatted(caught.value)
 
 
 # ---------------------------------------------- DESIGN: only trusted failures are forwarded

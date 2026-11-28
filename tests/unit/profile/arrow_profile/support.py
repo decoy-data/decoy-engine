@@ -26,6 +26,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine.contracts.column_shape import ColumnShape
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.profile._readers import ProfileSource, build_profile_source
 from decoy_engine.profile._readers_resident import ResidentTableSource
 from decoy_engine.profile._source import _profile_one_source
@@ -86,7 +87,12 @@ def bounded_profile(
 
 
 class BaseRaisedError(Exception):
-    """The merge base raised on this case (its text is not pinned)."""
+    """The merge base raised on this case (its text is not pinned). `code` is the registered
+    reason of a coded engine error, else None."""
+
+    def __init__(self, name: str, code: str | None = None) -> None:
+        super().__init__(name)
+        self.code = code
 
 
 PINS = Path(__file__).parent / "pins" / "base_profiles.json"
@@ -230,7 +236,7 @@ def base_profile(
         pytest.fail(f"no pinned base profile for case {key[:12]}; re-record with {_RECORD_ENV}")
     pinned = pins[key]
     if "raises" in pinned:
-        raise BaseRaisedError(pinned["raises"])
+        raise BaseRaisedError(pinned["raises"], pinned.get("code"))
     return _profile_from_json(pinned["profile"])
 
 
@@ -275,11 +281,16 @@ def assert_matches_base(
     reader = make_reader(kind, table, data, tmp_path, monkeypatch)
     try:
         oracle = base_profile(kind, table, data, **kw)
-    except BaseRaisedError:
+    except BaseRaisedError as raised:
         read_back = pq.ParquetFile(io.BytesIO(data)).schema_arrow if data else table.schema
         if data and _flat_temporal_schema(read_back):
             # The one place a base failure may become a success: a flat date/time schema.
             assert any(c.dtype == "object" for c in bounded_profile(reader, kind, **kw).columns)
+        elif raised.code is not None:
+            # A coded base failure (#799's one source read) is the same code on the branch.
+            with pytest.raises(ExecutionError) as caught:
+                bounded_profile(reader, kind, **kw)
+            assert caught.value.code == raised.code
         else:
             with pytest.raises(ValueError, match=SAFE_FAILURE):
                 bounded_profile(reader, kind, **kw)
