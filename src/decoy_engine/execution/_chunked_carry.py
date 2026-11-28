@@ -37,7 +37,8 @@ from decoy_engine.execution._errors import ExecutionError
 
 PASSTHROUGH_UNREPRESENTABLE_CODE = reasons.runtime.CHUNKED_PASSTHROUGH_VALUE_UNREPRESENTABLE
 
-# Exceptions a pandas conversion raises for a value it refuses. A built-in
+# Exceptions a pandas conversion raises for a value it refuses, or the coded `ExecutionError` the
+# source-read choke point turns them into (`arrow_to_frame`; the diagnosis matches it by text). A built-in
 # `TypeError` is eligible for the profile walk only (an unhashable nested value
 # fails `nunique`); `pa.ArrowTypeError` is eligible everywhere.
 _CONVERSION_ERRORS: tuple[type[BaseException], ...] = (pa.ArrowInvalid, pa.ArrowTypeError)
@@ -46,7 +47,7 @@ _CONVERSION_ERRORS: tuple[type[BaseException], ...] = (pa.ArrowInvalid, pa.Arrow
 def _conversion_errors() -> tuple[type[BaseException], ...]:
     from pandas.errors import OutOfBoundsDatetime
 
-    return (*_CONVERSION_ERRORS, ValueError, OverflowError, OutOfBoundsDatetime)
+    return (*_CONVERSION_ERRORS, ValueError, OverflowError, OutOfBoundsDatetime, ExecutionError)
 
 
 def is_stock_adapter(adapter: Any) -> bool:
@@ -140,7 +141,7 @@ class CarryPlan:
             if name not in self.read:
                 continue
             try:
-                to_pandas_fk_safe(chunk.select([name]), {name} & safe)
+                to_pandas_fk_safe(chunk.select([name]), {name} & safe, table_name=table)
             except Exception as again:
                 if _same_failure(again, exc):
                     self._raise_if_read(name, exc, table=table, chunk_index=chunk_index)
@@ -162,6 +163,8 @@ class CarryPlan:
 
 
 def _same_failure(a: BaseException, b: BaseException) -> bool:
+    if isinstance(a, ExecutionError) and isinstance(b, ExecutionError) and a.column is not None:
+        return a.code == b.code and a.column == b.column
     return type(a) is type(b) and str(a) == str(b)
 
 

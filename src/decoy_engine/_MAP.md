@@ -44,6 +44,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `subset/` | FK-aware subsetting (preflight, plan, run) |
 | `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to, the two store records (`decoy-resume-run/v1`, `decoy-resume-table/v1`) and `plan_resume`, the keep or rerun decision |
 | `providers_v2/`, `providers.py` | Provider registry and identifier adapters |
+| `arrow_frames.py` | Public experimental Arrow-to-pandas conversion names (wraps `internal/pandas_compat`) |
 | `identifiers.py`, `checksums.py`, `codesets/`, `reference_tables/` | Identifier families, check digits, code corpora, reference datasets |
 | `disguises/` | Compliance disguise bundles |
 | `determinism/`, `keyprovider.py`, `_reference_date.py` | Seed protocol, key derivation, reference-date anchoring |

@@ -4,6 +4,9 @@
  "entries": {
   "providers.py": {
    "reason": "initial X0a inventory of test_public_import_boundary.py; existing entry, reviewed by its own sentry"
+  },
+  "arrow_frames.py": {
+   "reason": "public facade over internal.pandas_compat for the three experimental arrow_to_* names, same pattern as providers.py; owner 2026-11-24"
   }
  }
 }

@@ -339,7 +339,7 @@ def test_only_a_deferred_ner_fail_holds_the_quarantine_write(
 ) -> None:
     """The hold is for the NER block alone: under `warn` a deferred check never blocks, so the
     file is written before the check runs, as on any other deferred run."""
-    from decoy_engine.execution.pipeline import _post_scan
+    from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 
     run, qpath = _quarantine_loader_run(
         tmp_path, {"detectors": ["regex", "ner"], "ner_findings": ner_findings}
@@ -364,7 +364,7 @@ def test_a_regex_fail_alone_never_blocks(monkeypatch: pytest.MonkeyPatch) -> Non
     with the regex code alone, never `ner_blocked`."""
     import inspect
 
-    from decoy_engine.execution.pipeline._post_scan import PostScanGate
+    from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 
     assert "detectors" in inspect.signature(PostScanGate).parameters, "no detectors are passed in"
     _fake_ner(monkeypatch, 0)

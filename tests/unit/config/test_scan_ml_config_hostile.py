@@ -49,15 +49,55 @@ def _refused(raw: dict[str, Any], code: str, *secrets: str) -> None:
         assert secret not in shown
 
 
-@pytest.mark.parametrize("scan", ["pre_scan", "post_scan"])
-@pytest.mark.parametrize(
-    "detectors", [["classifier"], ["ner"], [], ["regex", "regex"], ["regex", "ner", "ner"]]
-)
-def test_detectors_need_regex_and_no_duplicates(scan: str, detectors: list[str]) -> None:
-    block: dict[str, Any] = {"detectors": detectors}
+def _block(scan: str, **fields: Any) -> dict[str, Any]:
+    block: dict[str, Any] = dict(fields)
     if scan == "post_scan":
         block["integrity"] = True
-    _refused(_cfg(**{scan: block}), "detectors_invalid")
+    return _cfg(**{scan: block})
+
+
+@pytest.mark.parametrize("scan", ["pre_scan", "post_scan"])
+@pytest.mark.parametrize(
+    ("detectors", "expected"),
+    [
+        (["classifier"], ("regex", "classifier")),
+        (["ner"], ("regex", "ner")),
+        ([], ("regex",)),
+        (["ner", "regex"], ("regex", "ner")),
+        (["ner", "classifier"], ("regex", "classifier", "ner")),
+    ],
+)
+def test_regex_is_added_when_missing(
+    scan: str, detectors: list[str], expected: tuple[str, ...]
+) -> None:
+    """AT-E1a, AT-E1b: a list without regex is normalized, never refused."""
+    parsed = PipelineConfig.model_validate(_block(scan, detectors=detectors))
+    assert getattr(parsed, scan).detectors == expected
+
+
+@pytest.mark.parametrize("scan", ["pre_scan", "post_scan"])
+@pytest.mark.parametrize(
+    ("detectors", "code"),
+    [
+        (["regex", "regex"], "detectors_invalid"),
+        (["regex", "ner", "ner"], "detectors_invalid"),
+        (["ner", "ner"], "detectors_invalid"),
+        (["bogus"], "literal_error"),
+        (["regex\n"], "literal_error"),
+    ],
+)
+def test_detector_repeats_and_unknown_sources_stay_refused(
+    scan: str, detectors: list[str], code: str
+) -> None:
+    """AT-E1c: the repeat and unknown-source refusals keep the codes main raises today."""
+    _refused(_block(scan, detectors=detectors), code)
+
+
+@pytest.mark.parametrize("detectors", [["regex"], ["classifier"], []])
+def test_ner_model_without_ner_is_still_refused(detectors: list[str]) -> None:
+    """AT-E1c: normalizing regex in does not make `ner_model` valid without ner."""
+    raw = _cfg(pre_scan={"detectors": detectors, "ner_model": "en_core_web_sm"})
+    _refused(raw, "pre_scan_ner_inactive")
 
 
 @pytest.mark.parametrize("scan", ["pre_scan", "post_scan"])

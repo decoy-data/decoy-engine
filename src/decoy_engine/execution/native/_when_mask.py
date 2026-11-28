@@ -47,7 +47,9 @@ def when_specs(col_seed_by_name: Mapping[str, Any]) -> dict[str, WhenSpec]:
     }
 
 
-def when_mask(spec: WhenSpec, raw_chunk: pa.Table, protected: Collection[str]) -> pa.Array:
+def when_mask(
+    spec: WhenSpec, raw_chunk: pa.Table, protected: Collection[str], *, table: str | None = None
+) -> pa.Array:
     """The rows of `raw_chunk` the predicate selects, as a non-null boolean array.
 
     `raw_chunk` is the chunk as the source produced it, before null-typed columns are cast:
@@ -55,7 +57,9 @@ def when_mask(spec: WhenSpec, raw_chunk: pa.Table, protected: Collection[str]) -
     oracle's own eval error for an undefined name is raised.
     """
     present = [r.column for r in spec.refs if r.column in raw_chunk.column_names]
-    frame = to_pandas_fk_safe(raw_chunk.select(present), set(protected) & set(present))
+    frame = to_pandas_fk_safe(
+        raw_chunk.select(present), set(protected) & set(present), table_name=table
+    )
     mask = _eval_predicate(frame, spec.expression, spec.strategy, column=spec.column)
     return pa.array(mask.to_numpy(dtype=bool, na_value=False), type=pa.bool_())
 
@@ -72,7 +76,10 @@ class WhenMasks:
     def for_chunk(self, raw_chunk: pa.Table, chunk_index: int) -> dict[str, pa.Array]:
         """Every `when:` column's mask for one chunk, inside the oracle leg's carry diagnosis."""
         try:
-            return {n: when_mask(spec, raw_chunk, self.protected) for n, spec in self.specs.items()}
+            return {
+                n: when_mask(spec, raw_chunk, self.protected, table=self.table)
+                for n, spec in self.specs.items()
+            }
         except Exception as exc:
             if self.carry is not None:
                 self.carry.diagnose_adapter(

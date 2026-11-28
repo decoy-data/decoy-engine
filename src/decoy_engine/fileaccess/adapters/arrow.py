@@ -102,14 +102,17 @@ def table_from_pandas(display: str, frame: pd.DataFrame) -> pa.Table:
     return guarded(display, True, pa.Table.from_pandas, frame, preserve_index=False)
 
 
-def parquet_table_to_pandas(table: pa.Table) -> pd.DataFrame:
-    """The frame `pd.read_parquet` returns for `table`: `Table.to_pandas()` (what pandas calls
-    for the default dtype backend), then `attrs` from the `PANDAS_ATTRS` schema metadata.
+def parquet_table_to_pandas(
+    table: pa.Table, convert: Callable[[pa.Table], pd.DataFrame]
+) -> pd.DataFrame:
+    """The frame `pd.read_parquet` returns for `table`: `convert(table)` (the caller's
+    `Table.to_pandas()`, what pandas calls for the default dtype backend), then `attrs` from the
+    `PANDAS_ATTRS` schema metadata.
 
     Pattern: pandas `io/parquet.py` `PyArrowImpl.read`. pyarrow 14 to 20 leave `attrs` to the
-    caller, and the step is harmless where pyarrow already restores them. Runs inside a guarded
-    collect, so a failure here leaves as the caller's read error."""
-    frame = table.to_pandas()
+    caller, and the step is harmless where pyarrow already restores them. The caller passes the
+    conversion so a column pandas cannot hold fails with the caller's own coded error."""
+    frame = convert(table)
     metadata = table.schema.metadata
     if metadata and b"PANDAS_ATTRS" in metadata:
         frame.attrs = json.loads(metadata[b"PANDAS_ATTRS"])

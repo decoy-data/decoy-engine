@@ -26,11 +26,13 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine._lexeme import LEXEME_KEY, pandas_lexeme_kwargs
 from decoy_engine.connectors import _clients
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
 from decoy_engine.fileaccess.adapters import pandas as pandas_adapter
 from decoy_engine.fileaccess.adapters.memory import StreamHandle
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._readers import (
     PROOF_READ_ERRORS,
     ProfileSource,
@@ -179,13 +181,16 @@ def _read_parquet_frame(size: int, fetch: Fetch, provider: str) -> pd.DataFrame:
     """The object as `pd.read_parquet` gives it, one column chunk per request. The schema keeps
     the pandas metadata (index, categoricals, timezones) and a file with no row groups valid."""
     handle, pf = _parquet(size, fetch, provider)
-    return arrow_adapter.collect_batches(
+    table = arrow_adapter.collect_batches(
         handle,
         pf,
-        lambda b: arrow_adapter.parquet_table_to_pandas(
-            pa.Table.from_batches(b, schema=pf.schema_arrow)
-        ),
+        lambda b: pa.Table.from_batches(b, schema=pf.schema_arrow),
         batch_size=_PARQUET_FRAME_BATCH_ROWS,
+    )
+    # Converted after the guarded read, through the one source-read conversion, so a column
+    # pandas cannot hold raises its own code (as `main`'s `to_frame` does), not a read error.
+    return arrow_adapter.parquet_table_to_pandas(
+        table, partial(arrow_to_frame, on_unrepresentable=source_column_unrepresentable())
     )
 
 

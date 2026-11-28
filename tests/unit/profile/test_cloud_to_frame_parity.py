@@ -99,7 +99,8 @@ def test_attrs_come_from_the_metadata_whatever_pyarrow_restores() -> None:
     table = pq.read_table(io.BytesIO(_parquet("attrs")))
     older: Any = Older(table)
     assert older.to_pandas().attrs == {}  # non-vacuity: the stand-in does drop them
-    assert arrow_adapter.parquet_table_to_pandas(older).attrs == {"source": "unit", "n": 3}
+    restored = arrow_adapter.parquet_table_to_pandas(older, lambda t: t.to_pandas())
+    assert restored.attrs == {"source": "unit", "n": 3}
 
 
 _CSV = b"id,age,note\n1,NA,x\n2,042,\n3,,NA\n"

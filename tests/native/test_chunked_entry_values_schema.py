@@ -15,7 +15,6 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from pandas.errors import OutOfBoundsDatetime
 
 from decoy_engine import run_mask_chunked, run_mask_pipeline_chunked
 from decoy_engine.execution import ExecutionError, PandasExecutionAdapter, run_pipeline
@@ -640,26 +639,33 @@ def test_e4_list_of_int64_above_2_pow_53_agrees_with_the_oracle() -> None:
 
 
 @pytest.mark.parametrize(
-    "dtype, values",
+    "dtype, values, code",
     [
-        (pa.time64("ns"), [1000, None, 3001, 5, 7, None, 9]),
-        (pa.date32(), [2**31 - 1, None, 0, 1, 2, None, 3]),
+        (
+            pa.time64("ns"),
+            [1000, None, 3001, 5, 7, None, 9],
+            "full_frame_value_unrepresentable",
+        ),
+        (
+            pa.date32(),
+            [2**31 - 1, None, 0, 1, 2, None, 3],
+            "source_column_unrepresentable",
+        ),
     ],
     ids=["time64_ns_with_nanoseconds", "date32_outside_pandas_range"],
 )
 def test_e4_value_pandas_refuses_raises_on_the_oracle_and_is_exact_on_the_entry(
-    dtype: pa.DataType, values: list[Any]
+    dtype: pa.DataType, values: list[Any], code: str
 ) -> None:
-    """(d) and (e) The oracle still converts every passthrough column through pandas; the
+    """(d) and (e) The oracle still converts every passthrough column through pandas and refuses with the coded value-free error (source-read boundary, S1b); the
     stock-adapter entry carries the column from the source."""
     src = _e4_source("p", values, dtype)
     chunks = split(src, 2)
     config = make_config([redact("s"), passthrough("p")])
-    with pytest.raises(
-        (pa.ArrowInvalid, pa.ArrowTypeError, ValueError, OverflowError, OutOfBoundsDatetime)
-    ) as refused:
+    with pytest.raises(ExecutionError) as refused:
         _oracle(config, chunks)
-    assert not isinstance(refused.value, ExecutionError)
+    assert refused.value.code == code
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
     got = _entry(config, chunks)
     assert pa.concat_tables(got).column("p").equals(pa.chunked_array([pa.array(values, dtype)]))
 

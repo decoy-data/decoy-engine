@@ -15,6 +15,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from decoy_engine import reasons
+from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._isolated_common import is_memory_failure
 from decoy_engine.fileaccess import FileAccessReadError
 from decoy_engine.fileaccess._errors import resurface_scrubbed
@@ -67,6 +69,29 @@ def test_parquet_int_conversion_failure_is_value_free(
         _run(_source(provider, "parquet"), read)
     _assert_free(info.value, caplog)
     assert is_memory_failure(info.value)
+
+
+def _far_date_parquet() -> bytes:
+    """A `date32` in year 10000, which pandas cannot hold (the source-read boundary's case)."""
+    days = pa.array([2932897, 19000], pa.int32()).cast(pa.date32())
+    sink = io.BytesIO()
+    pq.write_table(pa.table({"id": [1, 2], "d": days}), sink)
+    return sink.getvalue()
+
+
+@pytest.mark.parametrize("provider", ["s3", "gcs"])
+def test_parquet_to_frame_unrepresentable_column_is_coded(
+    monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
+    """The bounded `to_frame` converts through the one source-read conversion, as `main`'s did:
+    the column pandas cannot hold leaves as the coded error that names it, with no date."""
+    _serve(monkeypatch, provider, _far_date_parquet())
+    with pytest.raises(ExecutionError) as info:
+        _source(provider, "parquet").to_frame()
+    assert info.value.code == reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE
+    assert "'d'" in str(info.value)
+    assert "10000" not in _everything(info.value) and "2932897" not in _everything(info.value)
+    assert info.value.__cause__ is None and info.value.__context__ is None
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from decoy_engine.config import parse_relationship_config
-from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 from decoy_engine.verification import postmask
 from decoy_engine.verification.postmask import fk_preservation
 
