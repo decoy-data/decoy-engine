@@ -348,8 +348,6 @@ _KNOWN_SCHEMES: frozenset[str] = frozenset(_VALIDATORS.keys())
 # satisfied by a format-preserving permutation.
 FPE_UNSUPPORTED_SCHEMES: frozenset[str] = frozenset({"iban"})
 
-FpeSchemeClass = Literal["supported", "unsupported", "unknown"]
-
 
 def required_charset(scheme: str) -> frozenset[str] | None:
     """The characters a configured FPE charset must cover for ``scheme`` (None: no requirement)."""
@@ -361,7 +359,7 @@ def recognized_schemes() -> list[str]:
     return sorted(_KNOWN_SCHEMES)
 
 
-def classify_fpe_scheme(scheme: object) -> FpeSchemeClass:
+def classify_fpe_scheme(scheme: object) -> Literal["supported", "unsupported", "unknown"]:
     """The one FPE verdict on a configured checksum scheme.
 
     ``unknown``: not a string, or not in the registry. ``unsupported``: recognized but never
