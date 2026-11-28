@@ -1,10 +1,10 @@
 # RATCHET-GROWTH moved keys and RATCHET-BURNDOWN: follow pure moves, then shrink the debt lists
 
-Status: plan, pending OQ6.
+Status: plan. OQ1 to OQ6 decided 2026-11-28.
 
 Rows: RATCHET-GROWTH (the moved-keys widening, owner 2026-11-27) and RATCHET-BURNDOWN (new 1.0
 health row, owner 2026-11-27). Both row texts come from CLI PR #427 (`docs/ratchet-rehome-and-burndown`),
-which is open and not merged on 2026-11-28. Build waits on that merge (OQ1).
+which is open and not merged on 2026-11-28. Build waits on that merge (OQ1, decided: merge as is).
 
 Repos: engine (decoy-data/decoy-engine) and CLI (decoy-data/decoy). Release: the engine half ships
 in the next engine release after main 8414da35c; the CLI half ships with the CLI repin that follows
@@ -60,7 +60,7 @@ Non-goals:
   (`validation-name-messages`) (GUARD_KEYS at `_ratchet.py:52`, REKEY_PER_SITE at `:40`).
 - Not the outbound-text burndown: engine-exception-text-copies, config-refusal-text, CLI
   one-error-emitter, engine-reason-code-copies stay with F31-AUDIT (AE5b, AC1, AC3).
-- Not module-size (engine: STRUCTURE-REVIEW, "Not now"; CLI: CLI-SPLIT S2) unless OQ3 says so.
+- Not module-size (engine: STRUCTURE-REVIEW, "Not now"; CLI: CLI-SPLIT S2) (OQ3, decided: defer to 1.x).
 - Not census burndown (f29-producer, f29-reason, f29-consumer, secret-material-census,
   serial-resources, gcs-call-kwargs, import-layers, platform-census, exception-context,
   win32-import-surface). They record inventory. Section 6.3 specifies which inventory keys can move.
@@ -576,23 +576,24 @@ Out of scope: census baselines and F31-owned lists, module-size (OQ3), CLI gate-
 - `docs/plans/2026-11-24-postmask-fail-closed-and-ratchet-growth.md` (RG-E3, RG-C1a, RG-C1b).
 - F31-AUDIT AE5b, AC1, AC3; CLI-SPLIT S2; EW2 to EW5; CONFIG-EXPLICIT C2.
 
-## 15. Open owner questions (recommendation first)
+## 15. Owner decisions (decided 2026-11-28)
 
-- OQ1. PR #427 adds both rows and is not merged. (a) Merge as is and build this plan [recommended];
-  (b) merge only the moved-keys widening, hold BURNDOWN for 1.x; (c) hold both.
-- OQ2. Inferred moves with a stderr line, or declared `moved_from` only? (a) inferred plus declared
-  [recommended, matches "a pure move needs no hand-written row"]; (b) declared only, widened.
-- OQ3. Engine module-size burndown (25 entries, 9 under `scripts/`). (a) defer to STRUCTURE-REVIEW
-  in 1.x [recommended, on the "Not now" list]; (b) `scripts/` entries only now; (c) all now.
-- OQ4. BD-E4 adds three public engine accessors in 1.0. (a) yes, additive and already requested
-  in `docs/handoffs/inputs/cli-needs-engine-public-api.md` [recommended]; (b) 1.x.
-- OQ5. Burndown targets: (a) a reasoned floor per guard, signed in the BD-A0 ledger [recommended];
-  (b) zero for every debt guard; (c) only the three slices here for 1.0, rest 1.x.
-- OQ6. Which proof should MK ship? (b) Recommended: keep strict inference and allow explicit
-  engine declarations under 6.1. Of the six historical moves this frees #775 automatically
-  and #792 by declaration. PCR, AE5, vault and observed_shape still require owner review for growth.
-  (c) Drop MK, retain today's checker and BD slices; none of the six gains a new route.
+Owner, 2026-11-28: "Go with recommended on all ratchet questions". All six questions are closed.
 
-  (a) Strict-only fallback: require equal normalized defs on new declared paths too. An explicit
-  pairing may change both location parts but must keep the bound. Keep the two legacy binding
-  carve-outs, the CLI map contract and the rename requirement. Only #775 passes among the six.
+- OQ1. Decided: merge CLI PR #427 as is and build this plan. Build still waits on that merge.
+- OQ2. Decided: inferred moves with a stderr line, plus declared `moved_from`.
+- OQ3. Decided: defer the engine module-size burndown to STRUCTURE-REVIEW in 1.x.
+- OQ4. Decided: BD-E4 adds the three public engine accessors in 1.0.
+- OQ5. Decided: a reasoned floor per guard, signed in the BD-A0 ledger.
+- OQ6. Decided: option (b). Keep strict inference and allow explicit engine declarations under
+  6.1. Of the six historical moves this frees #775 automatically and #792 by declaration. PCR,
+  AE5, vault and observed_shape still require owner review for growth.
+
+## Appendix A. Options not chosen
+
+- OQ1: (b) merge only the moved-keys widening and hold BURNDOWN for 1.x; (c) hold both.
+- OQ2: (b) declared `moved_from` only, widened.
+- OQ3: (b) `scripts/` entries only now; (c) all now.
+- OQ4: (b) 1.x.
+- OQ5: (b) zero for every debt guard; (c) only the three slices here for 1.0, rest 1.x.
+- OQ6: (a) strict-only on declared paths; (c) drop MK and keep today's checker.
