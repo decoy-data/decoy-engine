@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Name, Problem, config_position, config_refusal
 from decoy_engine._error_base import raise_bare
 from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
@@ -486,7 +487,7 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
     Config-only (no profile, no source data): safe to run in --no-profile
     mode and in ``run_config_only_checks``.
     """
-    from decoy_engine.checksums import classify_fpe_scheme, recognized_schemes, required_charset
+    from decoy_engine.checksums import classify_fpe_scheme, required_charset
     from decoy_engine.transforms.fpe import _CHARSETS as _FPE_CHARSETS
 
     tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
@@ -507,32 +508,32 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
                 continue
             col_name = col_entry.get("name", "?")
             verdict = classify_fpe_scheme(checksum)
+            at_checksum = config_position(
+                "tables", Name(table_name), "columns", Name(col_name), "provider_config", "checksum"
+            )
             if verdict == "unknown":
-                raise PlanCompileError(
-                    code=reasons.plan.FPE_CHECKSUM_UNKNOWN_SCHEME,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.checksum",
-                    message=(
-                        f"column {col_name!r} in table {table_name!r} uses "
-                        "strategy fpe with an unknown checksum scheme. "
-                        f"Known schemes: {recognized_schemes()}. "
-                        "Check for typos; valid fpe checksum schemes are "
-                        "luhn, npi, vin, isbn13, ean13, gtin "
-                        "(iban is not supported for FPE mode)."
+                unknown_refusal = config_refusal(
+                    at_checksum,
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "strategy fpe has an unknown checksum scheme. Check for typos; valid "
+                        "fpe checksum schemes are luhn, npi, vin, isbn13, ean13, gtin "
+                        "(iban is not supported for FPE mode)"
                     ),
                 )
+                raise_bare(refusal_error(reasons.plan.FPE_CHECKSUM_UNKNOWN_SCHEME, unknown_refusal))
             if verdict == "unsupported":
-                raise PlanCompileError(
-                    code=reasons.plan.FPE_CHECKSUM_IBAN_UNSUPPORTED,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.checksum",
-                    message=(
-                        f"column {col_name!r} in table {table_name!r} uses "
-                        "strategy fpe with checksum='iban'. FPE checksum mode "
-                        "does not support 'iban': per-country BBAN structure "
-                        "(enforced by stdnum.iban.validate) cannot be satisfied "
-                        "by a format-preservation permutation. "
-                        "Use validate-only or a different strategy for IBAN columns."
+                iban_refusal = config_refusal(
+                    at_checksum,
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "strategy fpe does not support checksum 'iban': per-country BBAN "
+                        "structure (enforced by stdnum.iban.validate) cannot be satisfied by a "
+                        "format-preservation permutation. Use validate-only or a different "
+                        "strategy for IBAN columns"
                     ),
                 )
+                raise_bare(refusal_error(reasons.plan.FPE_CHECKSUM_IBAN_UNSUPPORTED, iban_refusal))
             # Charset-vs-scheme compatibility: a charset missing characters
             # required by the scheme causes values to pass through unmasked
             # (silent no-op).  Fail closed at compile.
@@ -547,20 +548,29 @@ def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
             if required is not None:
                 missing = required - charset_set
                 if missing:
-                    raise PlanCompileError(
-                        code=reasons.plan.FPE_CHECKSUM_CHARSET_INCOMPATIBLE,
-                        path=(f"tables.{table_name}.columns.{col_name}.provider_config.charset"),
-                        message=(
-                            f"column {col_name!r} in table {table_name!r} uses "
-                            f"strategy fpe with checksum={checksum!r} but the "
-                            "the configured charset is missing "
-                            f"characters required by the {checksum!r} scheme: "
-                            f"{sorted(missing)!r}. A charset that cannot represent "
-                            "the scheme alphabet causes source values to pass through "
-                            "unmasked (silent no-op). Use a charset that is a superset "
-                            "of the scheme alphabet (e.g. 'ALPHANUM' for vin, "
-                            "'digits' for luhn/npi/ean13/isbn13/gtin)."
+                    at_charset = config_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "charset",
+                    )
+                    incompatible_refusal = config_refusal(
+                        at_charset,
+                        Problem.MISMATCH,
+                        hint=(
+                            "strategy fpe: the charset is missing characters the checksum "
+                            "scheme requires. A charset that cannot represent the scheme "
+                            "alphabet causes source values to pass through unmasked (silent "
+                            "no-op). Use a charset that is a superset of the scheme alphabet "
+                            "(e.g. 'ALPHANUM' for vin, 'digits' for luhn/npi/ean13/isbn13/gtin)"
                         ),
+                    )
+                    raise_bare(
+                        refusal_error(
+                            reasons.plan.FPE_CHECKSUM_CHARSET_INCOMPATIBLE, incompatible_refusal
+                        )
                     )
 
 

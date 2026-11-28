@@ -41,7 +41,7 @@ from decoy_engine import reasons
 from decoy_engine._config_text import Name, Problem, config_position, config_refusal
 from decoy_engine._error_base import raise_bare
 from decoy_engine.errors import FpeUnencryptableError
-from decoy_engine.plan._errors import PlanCompileError, refusal_error
+from decoy_engine.plan._errors import refusal_error
 from decoy_engine.transforms.fpe import (
     _CHARSETS,
     FPE_CHARSET_DUPLICATE_TEXT,
@@ -124,15 +124,14 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
                 )
                 raise_bare(refusal_error(reasons.plan.FPE_CHARSET_NON_ASCII, ascii_refusal))
             if len(resolved) < 2:
-                raise PlanCompileError(
-                    code=reasons.plan.FPE_CHARSET_DEGENERATE,
-                    path=f"tables.{table_name}.columns.{col_name}.provider_config.charset",
-                    message=(
-                        f"fpe column {col_name!r} in table {table_name!r} resolves to a "
-                        f"charset with {len(resolved)} distinct character(s)"
-                        ". A degenerate charset (<2 "
-                        "distinct characters) leaves the column unmasked at run; use a "
-                        "named charset (digits/alpha/ALPHA/alphanum/ALPHANUM) or a "
-                        "literal charset with at least 2 distinct characters."
+                degenerate_refusal = config_refusal(
+                    at_charset,
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "the fpe charset has fewer than 2 distinct characters. A degenerate "
+                        "charset leaves the column unmasked at run; use a named charset "
+                        "(digits/alpha/ALPHA/alphanum/ALPHANUM) or a literal charset with at "
+                        "least 2 distinct characters"
                     ),
                 )
+                raise_bare(refusal_error(reasons.plan.FPE_CHARSET_DEGENERATE, degenerate_refusal))
