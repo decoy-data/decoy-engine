@@ -455,8 +455,7 @@ def _mask_date_shift(
     "YYYY-MM-DD"; "01/15/1990" reformats to "MM/DD/YYYY".
 
     A span that does not parse (an unrecognised format, or a date such as 2024-02-30) comes
-    back as ``token``, never as its real text. So does a span the shift would carry past
-    year 1 or 9999: free text holds dates nobody declared, so one edge date must not stop a run.
+    back as ``token``, never as its real text. So does a span shifted past year 1 or 9999.
     """
     try:
         fmt = _detect_date_format(matched_text)
