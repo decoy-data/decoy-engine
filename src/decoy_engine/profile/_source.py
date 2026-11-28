@@ -35,9 +35,13 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from decoy_engine import fileaccess, reason_adapter, reasons
+from decoy_engine._execution_error import ExecutionError, source_column_unrepresentable
+from decoy_engine._field_names import DuplicateFieldNamesError
 from decoy_engine._lexeme import profile_descriptors
 from decoy_engine.contracts.column_shape import source_format_for
 from decoy_engine.fileaccess import FileAccess, entry_point
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._declared_columns import (
     DeclarationRequest,
     PreparedDeclaredSources,
@@ -54,8 +58,11 @@ from decoy_engine.profile._readers import (
 from decoy_engine.profile._readers_resident import ResidentTableSource
 from decoy_engine.profile._types import Profile, Relationship, TableProfile
 from decoy_engine.profile._walk import walk_dataframe
+from decoy_engine.profile.arrow import ArrowSampleSource, recover_temporal_profile
+from decoy_engine.safe_output import safe_error_type
 
 if TYPE_CHECKING:
+    import pandas as pd
     import pyarrow as pa
 
 
@@ -200,19 +207,37 @@ def profile_source(
 # ---------------------------------------------------------------------
 
 
+def _holds_arrow_table(reader: ProfileSource) -> bool:
+    """True for a source that can hold list, struct or map columns: a resident table or a
+    Parquet reader (local, S3 or GCS). One rule for both the Arrow schema and the closed-label
+    failure boundary, so a new Parquet reader gets both or neither."""
+    return isinstance(reader, (ResidentTableSource, ArrowSampleSource))
+
+
 def source_schema(reader: ProfileSource) -> pa.Schema | None:
     """The Arrow schema of ``reader`` when it is cheap to read, else None.
 
     Only Parquet and resident tables supply one (they can hold list, struct or map columns);
     reading a CSV or fixed-width schema infers types from the file, which the bounded profile
     avoids. The profile walk and the scan both read this one rule."""
-    from decoy_engine.profile._cloud_readers import GcsParquetSource, S3ParquetSource
+    return reader.schema() if _holds_arrow_table(reader) else None
 
-    if isinstance(
-        reader, (ResidentTableSource, ParquetFileSource, S3ParquetSource, GcsParquetSource)
-    ):
-        return reader.schema()
-    return None
+
+def _nested_capable_schema(reader: ProfileSource) -> pa.Schema | None:
+    """The Arrow schema of a source `_holds_arrow_table` accepts (see `source_schema`)."""
+    return source_schema(reader)
+
+
+def _passes_through(exc: Exception) -> bool:
+    """True when `exc` must reach the caller as it is: a file-access policy decision, an engine
+    failure that carries a registered code, or the duplicate-name refusal. An uncoded engine
+    error (a `ConfigError`, a connector `PermanentError`) can quote a cell, so it is stripped to a
+    closed label like every other failure of a bounded profile."""
+    return (
+        fileaccess.keeps_class(exc)
+        or reason_adapter.carries_registered_code(exc)
+        or isinstance(exc, DuplicateFieldNamesError)
+    )
 
 
 def _profile_one_source(
@@ -235,6 +260,11 @@ def _profile_one_source(
     total (exact for Parquet/fixed_width, estimated for CSV), while
     null/distinct come from the bounded sample and the columns are flagged
     `sampled`.
+
+    A bounded profile of a Parquet or resident source fails with
+    `bounded source profile failed (<label>)`: the producer's exception text can quote a cell,
+    so only its closed label (`safe_error_type`) is reported. A file-access decision, a memory
+    failure and a coded engine failure keep their own type.
     """
     if residency == "full":
         df = reader.to_frame()
@@ -266,37 +296,126 @@ def _profile_one_source(
     else:
         effective_sample_rows = sample_rows
 
+    # The producer's exception text can quote a cell, so a Parquet or resident source fails with
+    # its closed label only; other readers keep their own errors.
+    boundary = _holds_arrow_table(reader)
+    result: TableProfile | str = ""
+    fresh: BaseException | None = None
+    try:
+        result = _profile_bounded(
+            reader,
+            table_name=table_name,
+            declared_pk_cols=declared_pk_cols,
+            fk_specs=fk_specs,
+            sample_rows=effective_sample_rows,
+            rng=rng,
+            source_format=source_format,
+        )
+    except Exception as exc:
+        if not boundary:
+            raise
+        # A memory failure's text can quote a cell, so it is rebuilt from fixed text by the
+        # shared classifier instead of being forwarded. This runs before the pass-through
+        # test: a strict policy keeps a memory-shaped error as it is, cell text included.
+        classified = fileaccess.classified_failure(exc)
+        if classified is not None and classified.fresh is not None:
+            fresh = classified.fresh
+        elif _passes_through(exc):
+            raise
+        else:
+            result = safe_error_type(exc).value
+    # Raised after the handler ends, so the producer's exception is neither cause nor context.
+    if fresh is not None:
+        raise fresh from None
+    if isinstance(result, str):
+        raise ValueError(f"bounded source profile failed ({result})")
+    return result
+
+
+def _profile_bounded(
+    reader: ProfileSource,
+    *,
+    table_name: str,
+    declared_pk_cols: frozenset[str],
+    fk_specs: dict[str, tuple[str, str]],
+    sample_rows: int,
+    rng: random.Random,
+    source_format: str | None,
+) -> TableProfile:
+    """The bounded profile: the true row count, one `<= sample_rows` sample, the pandas walk.
+
+    A Parquet reader hands over the sample as a table and it is converted here, so a failed
+    conversion can try `recover_temporal_profile` on the same table. When neither the whole
+    conversion nor the recovery gives a profile, the coded `source_column_unrepresentable`
+    error is raised once the conversion's handler has closed."""
     row_count = reader.row_count()
     # The profiled frame is parsed from exactly the cap, so no later row can change a
     # column's inferred type. An estimated row count (CSV) can undershoot the sample, so
     # when the cap is filled a second read asks for one row more. That frame is only
     # counted, never profiled. An exact count already says the source is larger.
-    sample_df = reader.sample_frame(effective_sample_rows)
-    proven_total = len(sample_df)
+    table = reader.sample_table(sample_rows) if isinstance(reader, ArrowSampleSource) else None
+    sample_df: pd.DataFrame | None = None
+    unconvertible: ExecutionError | None = None
+    if table is None:
+        sample_df = reader.sample_frame(sample_rows)
+        proven_total = len(sample_df)
+    else:
+        proven_total = table.num_rows
+        try:
+            sample_df = arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
+        except ExecutionError as exc:
+            if exc.code != reasons.runtime.SOURCE_COLUMN_UNREPRESENTABLE:
+                raise
+            # Kept, not raised: the flat-temporal recovery below may still profile the sample.
+            unconvertible = exc
     if (
         not row_count.exact
-        and proven_total == effective_sample_rows
-        and has_row_beyond(reader.sample_frame, effective_sample_rows)
+        and proven_total == sample_rows
+        and has_row_beyond(reader.sample_frame, sample_rows)
     ):
-        proven_total = effective_sample_rows + 1
+        proven_total = sample_rows + 1
     # Clamp the reported total to at least the rows actually sampled so a
     # coarse CSV estimate can never fall below the sample and break the
     # ColumnProfile `distinct_count <= row_count` invariant. Exact counts
     # (Parquet/fixed_width) already dominate the sample, so this is a no-op
     # for them.
     effective_total = max(row_count.value, proven_total)
-    table = walk_dataframe(
-        sample_df,
-        table_name=table_name,
-        declared_pk_cols=declared_pk_cols,
-        fk_specs=fk_specs,
-        sample_rows=effective_sample_rows,
-        rng=rng,
-        total_row_count=effective_total,
-        arrow_schema=source_schema(reader),
-        source_format=source_format,
-    )
-    return replace(table, row_count_exact=row_count.exact)
+    shape_schema = _nested_capable_schema(reader)
+
+    def walk(frame: pd.DataFrame) -> TableProfile:
+        return walk_dataframe(
+            frame,
+            table_name=table_name,
+            declared_pk_cols=declared_pk_cols,
+            fk_specs=fk_specs,
+            sample_rows=sample_rows,
+            rng=rng,
+            total_row_count=effective_total,
+            arrow_schema=shape_schema,
+            source_format=source_format,
+        )
+
+    if sample_df is not None:
+        profile = walk(sample_df)
+    elif table is not None and unconvertible is not None:
+        # The whole-sample conversion failed; only the one flat-temporal case recovers.
+        recovered = recover_temporal_profile(
+            table,
+            table_name=table_name,
+            total_row_count=effective_total,
+            declared_pk_cols=declared_pk_cols,
+            fk_specs=fk_specs,
+            source_format=source_format,
+            walk_frame=walk,
+        )
+        if recovered is None:
+            # The coded error was built after the conversion handler closed and names the
+            # column only, so raising it here carries no pandas or Arrow text.
+            raise unconvertible
+        profile = recovered
+    else:
+        raise AssertionError("a sample is a frame or a failed table")
+    return replace(profile, row_count_exact=row_count.exact)
 
 
 # ---------------------------------------------------------------------

@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import NamedTuple
 
 from decoy_engine.contracts.column_shape import ColumnShape
 from decoy_engine.profiling._basis import key_claim_allowed
@@ -157,6 +158,45 @@ class ColumnProfile:
                 f"ColumnProfile {self.name!r}: avg_length={self.avg_length} exceeds "
                 f"max_length={self.max_length}."
             )
+
+
+class KeyFields(NamedTuple):
+    """The candidate-key, primary-key and foreign-key fields of one `ColumnProfile`."""
+
+    is_candidate_key_sampled: bool
+    declared_pk: bool
+    is_fk: bool
+    fk_target: tuple[str, str] | None
+
+
+def column_key_fields(
+    name: str,
+    *,
+    row_count: int,
+    distinct_count: int | None,
+    sampled: bool,
+    declared_pk_cols: frozenset[str],
+    fk_specs: dict[str, tuple[str, str]],
+) -> KeyFields:
+    """The key fields for column `name`; the one rule both profile walks use.
+
+    `is_candidate_key_sampled` is True only when the profile is a full scan (`sampled` False),
+    `distinct_count` is known and equals `row_count`, and there is at least one row (H6: an
+    empty table is vacuously "distinct", which is not a useful signal for the planner).
+    `ColumnProfile.__post_init__` also rejects `sampled` with a candidate key, so this and-chain
+    is the only path that can return True.
+    """
+    return KeyFields(
+        is_candidate_key_sampled=(
+            not sampled
+            and row_count > 0
+            and distinct_count is not None
+            and distinct_count == row_count
+        ),
+        declared_pk=name in declared_pk_cols,
+        is_fk=name in fk_specs,
+        fk_target=fk_specs.get(name),
+    )
 
 
 @dataclass(frozen=True)

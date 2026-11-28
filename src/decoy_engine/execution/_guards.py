@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine._field_names import repeated_names
+from decoy_engine._field_names import duplicate_names_message
 from decoy_engine.execution._column_access import created_columns
 from decoy_engine.execution._errors import (
     ExecutionError,
@@ -54,12 +54,9 @@ def refuse_duplicate_field_names(table: str, names: Iterable[str]) -> None:
     and a count, never the names: a header is producer-controlled text. The owner stays
     `TransformError`, the pinned owner of this reason identity.
     """
-    repeated = repeated_names(names)
-    if repeated:
-        raise TransformError(
-            code=reasons.runtime.DUPLICATE_SOURCE_FIELD_NAMES,
-            message=f"table {table!r} has {len(repeated)} duplicated field name(s)",
-        )
+    message = duplicate_names_message(table, names)
+    if message is not None:
+        raise TransformError(code=reasons.runtime.DUPLICATE_SOURCE_FIELD_NAMES, message=message)
 
 
 def refused_per_chunk(chunks: Iterator[pa.Table], *, table: str) -> Iterator[pa.Table]:

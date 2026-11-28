@@ -24,6 +24,15 @@ from decoy_engine.internal.pandas_compat import (
 pc: Any = importlib.import_module("pyarrow.compute")
 
 
+def holds_date32(t: pa.DataType) -> bool:
+    """A 32-bit date. The date decision goes through the shared classifier (the column-shape
+    sentry forbids a second one); the width tells date32 from date64."""
+    from decoy_engine.contracts.column_shape import ColumnShape
+    from decoy_engine.profile import observed_shape
+
+    return observed_shape(t, None) is ColumnShape.DATE and t.bit_width == 32
+
+
 def arrow_column_profile(
     name: str, column: pa.Array | pa.ChunkedArray, *, source_format: str | None = None
 ) -> Any:
@@ -38,8 +47,8 @@ def arrow_column_profile(
     string lengths are set only where pandas would call the column a string
     column. The chunked walk passes no PK, FK or PII inputs, so those fields are
     their defaults."""
-    from decoy_engine.profile._types import ColumnProfile
-    from decoy_engine.profile._walk import observed_shape
+    from decoy_engine.profile import observed_shape
+    from decoy_engine.profile.arrow._parent import ColumnProfile
 
     arr = _normalize(column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column)
     t = arr.type
@@ -103,9 +112,11 @@ def _normalize(arr: pa.Array) -> pa.Array:
             values = _normalize(arr.values)
             rebuilt = pa.RunEndEncodedArray.from_arrays(arr.run_ends, values)
             return pc.run_end_decode(rebuilt.slice(arr.offset, len(arr)))
-    if pa.types.is_string_view(t):
+    # The view predicates arrive in PyArrow 16. The declared floor is 14, where no value can
+    # have a view type, so a missing predicate means "not a view".
+    if hasattr(pa.types, "is_string_view") and pa.types.is_string_view(t):
         return arr.cast(pa.large_string())
-    if pa.types.is_binary_view(t):
+    if hasattr(pa.types, "is_binary_view") and pa.types.is_binary_view(t):
         return arr.cast(pa.large_binary())
     if pa.types.is_dictionary(t):
         dictionary = _normalize(arr.dictionary)

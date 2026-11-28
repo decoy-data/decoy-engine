@@ -33,8 +33,8 @@ from decoy_engine.profile._readers import (
     ProfileSource,
     RowCount,
     estimate_csv_rows,
-    head_frame_from_batches,
 )
+from decoy_engine.profile.arrow import head_table_from_batches, sample_table_frame
 
 # One ranged read big enough to cover a CSV header + a bounded sample on a
 # typical object, while still being a tiny fraction of a large file. read_csv
@@ -110,10 +110,10 @@ def _read_parquet_schema(size: int, fetch: Callable[[int, int], bytes]) -> pa.Sc
 
 def _read_parquet_sample(
     size: int, fetch: Callable[[int, int], bytes], sample_rows: int
-) -> pd.DataFrame:
+) -> pa.Table:
     reader = _RangeFileReader(size, fetch)
     parquet_file = pq.ParquetFile(pa.PythonFile(reader, mode="r"))
-    return head_frame_from_batches(
+    return head_table_from_batches(
         parquet_file.iter_batches(batch_size=sample_rows), sample_rows, parquet_file.schema_arrow
     )
 
@@ -263,9 +263,12 @@ class S3ParquetSource:
         _, size, fetch = self._bind()
         return _read_parquet_schema(size, fetch)
 
-    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
+    def sample_table(self, sample_rows: int) -> pa.Table:
         _, size, fetch = self._bind()
         return _read_parquet_sample(size, fetch, sample_rows)
+
+    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
+        return sample_table_frame(self.sample_table(sample_rows))
 
     def to_frame(self) -> pd.DataFrame:
         client = _s3_for(self._descriptor)
@@ -383,10 +386,13 @@ class GcsParquetSource:
     def schema(self) -> pa.Schema:
         return _with_gcs_reads(self._descriptor, _read_parquet_schema)
 
-    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
+    def sample_table(self, sample_rows: int) -> pa.Table:
         return _with_gcs_reads(
             self._descriptor, lambda size, fetch: _read_parquet_sample(size, fetch, sample_rows)
         )
+
+    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
+        return sample_table_frame(self.sample_table(sample_rows))
 
     def to_frame(self) -> pd.DataFrame:
         with _clients.gcs_client() as client:

@@ -51,9 +51,10 @@ from decoy_engine.profile._fixed_width_reader import (
 from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
+from decoy_engine.profile.arrow import head_table_from_batches, sample_table_frame
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
 # Fallback bounded sample size when a caller asks for a full scan
 # (sample_rows=None) under residency="bounded" -- see profile_source. A full
@@ -407,10 +408,13 @@ class ParquetFileSource(_PolicyBound):
     def schema(self) -> pa.Schema:
         return self._lazy().schema
 
-    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return head_frame_from_batches(
+    def sample_table(self, sample_rows: int) -> pa.Table:
+        return head_table_from_batches(
             self._lazy().iter_batches(sample_rows), sample_rows, self._lazy().schema
         )
+
+    def sample_frame(self, sample_rows: int) -> pd.DataFrame:
+        return sample_table_frame(self.sample_table(sample_rows))
 
     def to_frame(self) -> pd.DataFrame:
         return arrow_to_frame(
@@ -476,33 +480,6 @@ def has_row_beyond(read_sample: Callable[[int], pd.DataFrame], n: int) -> bool:
         return len(read_sample(n + 1)) > n
     except PROOF_READ_ERRORS:
         return True
-
-
-def head_frame_from_batches(
-    batches: Iterable[pa.RecordBatch], sample_rows: int, schema: pa.Schema
-) -> pd.DataFrame:
-    """Collect batches until `sample_rows` rows are gathered, as a DataFrame.
-
-    Stops reading as soon as the row target is met, so an arbitrarily large
-    source yields only `<= sample_rows` decoded rows. An empty source returns
-    an empty frame carrying the schema's columns (so the walker still emits one
-    ColumnProfile per column).
-    """
-    collected: list[pa.RecordBatch] = []
-    gathered = 0
-    for batch in batches:
-        collected.append(batch)
-        gathered += batch.num_rows
-        if gathered >= sample_rows:
-            break
-    if not collected:
-        return arrow_to_frame(
-            schema.empty_table(), on_unrepresentable=source_column_unrepresentable()
-        )
-    table = pa.Table.from_batches(collected)
-    if table.num_rows > sample_rows:
-        table = table.slice(0, sample_rows)
-    return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 # ---------------------------------------------------------------------
@@ -593,5 +570,4 @@ __all__ = [
     "estimate_csv_rows",
     "footer_facts_of",
     "has_row_beyond",
-    "head_frame_from_batches",
 ]

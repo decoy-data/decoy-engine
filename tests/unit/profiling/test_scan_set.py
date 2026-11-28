@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from decoy_engine import fileaccess, reasons
@@ -96,9 +97,9 @@ def test_bounded_head_reads_one_batch(tmp_path: Path, monkeypatch: pytest.Monkey
     path = tmp_path / "big.parquet"
     pd.DataFrame({"id": range(50_000)}).to_parquet(path, row_group_size=5_000)
     consumed = [0]
-    real = _readers.head_frame_from_batches
+    real = _readers.head_table_from_batches
 
-    def spy(batches: Any, sample_rows: int, schema: Any) -> pd.DataFrame:
+    def spy(batches: Any, sample_rows: int, schema: Any) -> pa.Table:
         def counted() -> Any:
             for batch in batches:
                 consumed[0] += batch.num_rows
@@ -106,7 +107,7 @@ def test_bounded_head_reads_one_batch(tmp_path: Path, monkeypatch: pytest.Monkey
 
         return real(counted(), sample_rows, schema)
 
-    monkeypatch.setattr(_readers, "head_frame_from_batches", spy)
+    monkeypatch.setattr(_readers, "head_table_from_batches", spy)
     scan = scan_sources(
         {"big": {"type": "file", "format": "parquet", "path": str(path)}}, sample_rows=1000
     )

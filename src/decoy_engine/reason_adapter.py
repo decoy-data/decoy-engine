@@ -136,6 +136,11 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     ("decoy_engine.errors", "EmptyParentPoolError", reasons.config.FK_EMPTY_PARENT_POOL),
     ("decoy_engine.errors", "UnknownFKColumnError", reasons.config.FK_UNKNOWN_COLUMN),
     ("decoy_engine.errors", "ConfigError", reasons.config.UNTAGGED),
+    (
+        "decoy_engine._field_names",
+        "DuplicateFieldNamesError",
+        reasons.runtime.DUPLICATE_SOURCE_FIELD_NAMES,
+    ),
     ("decoy_engine.config._errors", "PipelineConfigError", reasons.config.UNTAGGED),
     ("decoy_engine.errors", "RowErrorsFailedError", reasons.decoy.ROW_ERRORS_FAILED),
     ("decoy_engine.errors", "ValidatorFailedError", reasons.decoy.VERIFICATION_FAILED),
@@ -321,6 +326,19 @@ def _classify(exc: BaseException, phase: Phase, context: ReasonContext | None) -
     if publishing and isinstance(exc, OSError):
         return _record(reasons.decoy.PUBLICATION_FAILED, phase, context)
     return _record(reasons.decoy.UNEXPECTED_ERROR, phase, context)
+
+
+def carries_registered_code(exc: BaseException) -> bool:
+    """True when `exc` is a coded engine failure whose code the registry knows: a family from
+    the coded table, not one of the fixed-meaning classes (an uncoded `ConfigError`, a connector
+    `PermanentError`), whose text a caller must not trust. Imports nothing."""
+    coded, _ = _loaded_families()
+    if _first_in_mro(exc, coded) is None:
+        return False
+    return _classify(exc, Phase.UNKNOWN, None).code not in {
+        reasons.decoy.UNREGISTERED_REASON,
+        reasons.decoy.UNEXPECTED_ERROR,
+    }
 
 
 def _identified_reason(exc: BaseException) -> ReasonCode:

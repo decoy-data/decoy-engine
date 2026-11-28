@@ -96,3 +96,76 @@ def test_holdable_values_run_unchanged(tmp_path) -> None:
     # passthrough columns are byte-identical to the source
     assert out.column("d").to_pylist() == src.column("d").to_pylist()
     assert out.column("tod").to_pylist() == src.column("tod").to_pylist()
+
+
+# ---------------------------------------------------------------------------------------------
+# PREFLIGHT-ARROW-PROFILE AT-7: the coded error carries no exception chain. The pyarrow error
+# quotes the value, and a traceback renders `__context__`, so the code raises it after the
+# handler that diagnosed the failure has ended.
+
+import traceback  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pyarrow.parquet as pq  # noqa: E402
+
+_UNALIGNED = 45_296_123_456_789  # 12:34:56.123456789
+_FAR_DAYS = 3_000_000  # year 10183
+
+
+def _sources() -> dict[str, pa.Table]:
+    return {
+        "time64_ns": pa.table(
+            {"t": pa.array([1000, _UNALIGNED], pa.time64("ns")), "name": ["alice", "bob"]}
+        ),
+        "date_year_10183": pa.table(
+            {"t": pa.array([1, _FAR_DAYS], pa.date32()), "name": ["alice", "bob"]}
+        ),
+    }
+
+
+def _parquet_cfg(tmp_path: Path, table: pa.Table) -> dict:
+    path = tmp_path / "t.parquet"
+    pq.write_table(table, path)
+    return PipelineConfig.model_validate(
+        {
+            "version": 2,
+            "global_settings": {"seed": 42},
+            "sources": {"t": {"type": "file", "format": "parquet", "path": str(path)}},
+            "tables": [
+                {
+                    "name": "t",
+                    "columns": [{"name": "t", "strategy": "passthrough"}, _MASK_SIBLING],
+                }
+            ],
+            "targets": {
+                "t": {"type": "file", "format": "parquet", "path": str(tmp_path / "o.parquet")}
+            },
+        }
+    ).model_dump()
+
+
+def _assert_chain_free(exc: ExecutionError) -> None:
+    assert exc.code == "full_frame_value_unrepresentable"
+    assert exc.__context__ is None
+    assert exc.__cause__ is None
+    rendered = "".join(traceback.format_exception(exc))
+    for marker in (str(_UNALIGNED), "45296", "123456789", str(_FAR_DAYS), "10183"):
+        assert marker not in rendered
+
+
+@pytest.mark.parametrize("source", sorted(_sources()))
+@pytest.mark.parametrize("shape", ["lazy", "lazy_resident_fallback", "resident"])
+def test_at7_full_frame_error_has_no_exception_chain(tmp_path, source: str, shape: str) -> None:
+    from decoy_engine.profile import LazySource
+
+    table = _sources()[source]
+    cfg = _parquet_cfg(tmp_path, table)
+    supplied = (
+        {"t": LazySource(Path(cfg["sources"]["t"]["path"]))}
+        if shape != "resident"
+        else {"t": table}
+    )
+    extra = {"resident_fallback": True} if shape == "lazy_resident_fallback" else {}
+    with pytest.raises(ExecutionError) as caught:
+        run_pipeline(cfg, sources=supplied, engine_version=_EV, **extra)
+    _assert_chain_free(caught.value)

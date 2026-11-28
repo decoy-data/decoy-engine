@@ -60,7 +60,9 @@ from decoy_engine.profile._types import (
     Profile,
     Relationship,
     TableProfile,
+    column_key_fields,
 )
+from decoy_engine.profile._walk import observed_shape
 
 __all__ = [
     "ColumnProfile",
@@ -81,8 +83,10 @@ __all__ = [
     "build_lazy_source",
     "build_profile_source",
     "check_columns_declared",
+    "column_key_fields",
     "declaration_findings",
     "declared_columns",
+    "observed_shape",
     "prepare_declared_sources",
     "profile_from_json",
     "profile_hash",
