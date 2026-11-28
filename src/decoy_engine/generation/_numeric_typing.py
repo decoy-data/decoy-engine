@@ -41,6 +41,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.config import generated_arrow_type, reference_root
 from decoy_engine.generation._numeric_derived import derived_uses_as_numbers
 from decoy_engine.generation.kinds import output_arrow_type
@@ -414,4 +415,6 @@ def generated_table_to_pandas(table: pa.Table) -> Any:
     integer dtypes instead, so the text written from the frame matches the generated values.
     """
     ints = {f.name for f in table.schema if pa.types.is_integer(f.type)}
-    return table_to_pandas_exact_ints(table, ints)
+    return table_to_pandas_exact_ints(
+        table, ints, on_unrepresentable=source_column_unrepresentable()
+    )

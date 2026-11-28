@@ -66,7 +66,8 @@ from decoy_engine.generation.relational._aggregate import aggregate_values, with
 from decoy_engine.generation.relational._self_reference import reference_parents, self_reference
 from decoy_engine.generation.statistical import FanoutSpec, StatisticalSpec, select_table
 from decoy_engine.generators.derivation import TABLE_KEY, GenDeriveContext, with_table
-from decoy_engine.internal.faker_setup import get_faker_providers, make_faker
+from decoy_engine.internal.faker_locale import open_column_faker
+from decoy_engine.internal.faker_setup import get_faker_providers
 from decoy_engine.providers_v2 import get_default_registry
 from decoy_engine.transforms.derived_aggregate import generate_derived_aggregate_column
 
@@ -501,21 +502,9 @@ def _faker(
     gen_ctx = GenDeriveContext.for_column(
         derive_key=derive_key, column_config=col, fallback_seed=seed
     )
-    if locale:
-        faker_inst = make_faker(locale)
-        pre_seed: int | None = None
-    elif instance_default_locale:
-        # S6-ENG-4 M1: when no per-column locale, fall through to the platform's
-        # instance default locale (mirrors V1 `ColumnGenerator.__init__` lines
-        # 68-72 which uses `make_faker(instance_default_locale)` for `self.faker`).
-        faker_inst = make_faker(instance_default_locale)
-        pre_seed = seed
-    else:
-        # F-5 fix: cache the no-locale instance per thread. Per-row
-        # seed_instance below overrides the initial seed, so per-thread reuse
-        # is output-identical to a fresh instance.
-        faker_inst = _get_default_faker()
-        pre_seed = seed
+    faker_inst, pre_seed = open_column_faker(
+        locale, instance_default_locale, seed, _get_default_faker
+    )
     providers = get_faker_providers(faker_inst, provider_snapshot=provider_snapshot)
     provider_func = providers.get(faker_type) or providers["word"]
     out: list[Any] = []

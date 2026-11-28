@@ -562,3 +562,216 @@ def test_an_object_column_with_nat_keeps_the_identity_rate_of_the_real_values():
     out = pd.DataFrame({"ssn": pd.Series(values, dtype=object)})
     report = _parity({"t": src}, {"t": out}, _cfg(("ssn", "faker")))
     assert report["residual_pii"][0]["source_identity_rate"] == 1.0
+
+
+def _short_source(table: pa.Table) -> TableBatches:
+    """Declares `table`'s rows but reads back only the first one (a source that may drop rows,
+    so the row-count check does not refuse it)."""
+    full = from_table("t", table)
+
+    def read(columns: Sequence[str], batch_rows: int) -> Iterator[pa.RecordBatch]:
+        for batch in full.read(columns, batch_rows):
+            yield batch.slice(0, 1)
+            return
+
+    return replace(full, read=read, drops_rows=True)
+
+
+def test_output_rows_past_a_short_source_are_still_inspected(tmp_path: Path):
+    # The second output date is year 10000, which pandas cannot hold: the check must fail closed
+    # on it even though the source stream ended after one row.
+    day = pa.array([19000, 2_932_897], pa.date32())
+    src = pa.table({"d": pa.array([19000, 19001], pa.date32())})
+    out = pa.table({"d": day})
+    report = run_post_mask_tables(
+        {"t": _short_source(src)},
+        {"t": from_table("t", out)},
+        config=_cfg(("d", "hash")),
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    assert report["error_count"] >= 1
+    assert any(f["column"] == "d" and f["severity"] == "error" for f in report["residual_pii"])
+
+
+def test_an_unreadable_output_date_before_the_source_ends_stays_reported(tmp_path: Path):
+    # The unreadable value comes first, then the source stream ends early. The length mismatch
+    # must not erase the inspection failure: both stay on the column's facts and the gate still
+    # raises its unconditional error.
+    from decoy_engine import reasons
+
+    src = pa.table({"d": pa.array([19000, 19001, 19002], pa.date32())})
+    out = pa.table({"d": pa.array([2_932_897, 19001, 19002], pa.date32())})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["d"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )["d"]
+    assert facts.identity_error == reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
+    assert facts.distinct_error == reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+    report = run_post_mask_tables(
+        {"t": _short_source(src)},
+        {"t": from_table("t", out)},
+        config=_cfg(("d", "hash")),
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    assert any(
+        f["column"] == "d"
+        and f["severity"] == "error"
+        and reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE in f["message"]
+        for f in report["residual_pii"]
+    )
+
+
+def test_a_failed_distinct_count_does_not_hide_the_inspection_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # All three failures land on one column: an unreadable output value, a source that ends
+    # early, and an uncoded error from the distinct count. The inspection code must win on the
+    # facts, so the gate still raises its unconditional error.
+    from decoy_engine import reasons
+    from decoy_engine.verification.postmask import _column_facts
+
+    monkeypatch.setattr(_column_facts, "_distinct_or_error", lambda *a, **k: (0, "RuntimeError"))
+    src = pa.table({"d": pa.array([19000, 19001, 19002], pa.date32())})
+    out = pa.table({"d": pa.array([2_932_897, 19001, 19002], pa.date32())})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["d"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )["d"]
+    assert facts.identity_error == reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
+    assert facts.distinct_error == reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+    report = run_post_mask_tables(
+        {"t": _short_source(src)},
+        {"t": from_table("t", out)},
+        config=_cfg(("d", "hash")),
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    assert any(
+        f["column"] == "d"
+        and f["severity"] == "error"
+        and reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE in f["message"]
+        for f in report["residual_pii"]
+    )
+
+
+def test_a_source_that_reads_short_marks_identity_unavailable(tmp_path: Path):
+    src = pa.table({"e": ["a@x.com", "b@x.com"]})
+    out = pa.table({"e": ["a@x.com", "c@x.com"]})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["e"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )["e"]
+    assert facts.identity_error is not None
+    assert facts.comparable_rows == 0 and not facts.bytes_identical
+
+
+def test_a_short_source_fails_every_compared_column_with_its_own_code_and_inspects_the_rest(
+    tmp_path: Path,
+):
+    from decoy_engine import reasons
+
+    emails = [f"user{i}@realmail.com" for i in range(60)]
+    src = pa.table({"e": emails, "n": list(range(60))})
+    out = pa.table({"e": emails, "n": list(range(60))})
+    facts = column_facts(
+        _short_source(src),
+        from_table("t", out),
+        ["e", "n"],
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    for column in ("e", "n"):
+        assert facts[column].identity_error == reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
+        assert facts[column].comparable_rows == 0 and not facts[column].bytes_identical
+    # The output rows past the end of the source stream still reach the detectors.
+    assert facts["e"].detectors
+
+
+def _stored_index_table(case: str) -> tuple[pa.Table, list[tuple[str, str]]]:
+    emails = [f"user{i}@realmail.com" for i in range(20)]
+    others = [f"person{i}@othermail.com" for i in range(20)]
+    if case == "named":
+        frame = pd.DataFrame({"email": emails, "n": range(20)}).set_index("email")
+        columns = [("email", "redact")]
+    elif case == "unnamed":
+        frame = pd.DataFrame({"n": range(20)}, index=pd.Index(emails))
+        columns = [("__index_level_0__", "redact")]
+    else:
+        # An index and a data column both called "email": Arrow keeps two distinct fields.
+        frame = pd.DataFrame({"email": emails}, index=pd.Index(others, name="email"))
+        columns = [("email", "redact"), ("__index_level_0__", "redact")]
+    return pa.Table.from_pandas(frame), columns
+
+
+@pytest.mark.parametrize("case", ["named", "unnamed", "collision"])
+def test_a_stored_index_gets_the_same_verdict_on_the_resident_and_batch_gates(
+    case: str, tmp_path: Path
+):
+    from decoy_engine.execution.pipeline.post_scan._suite import suite_frames
+
+    table, columns = _stored_index_table(case)
+    config = _cfg(*columns)
+    src_frames, out_frames = suite_frames({"t": table}, {"t": table}, ["t"])
+    # Every physical field is a plain column under its own name, so the resident gate sees the
+    # column set the batch gate reads.
+    assert list(out_frames["t"].columns) == table.schema.names
+    resident = run_post_mask(src_frames, out_frames, config=config)
+    batch = run_post_mask_tables(
+        {"t": from_table("t", table)},
+        {"t": from_table("t", table)},
+        config=config,
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    for report in (resident, batch):
+        report.pop("generated_at")
+    assert resident["fail_count"] == batch["fail_count"] >= len(columns)
+    assert resident["residual_pii"] == batch["residual_pii"]
+    failed = {f["column"] for f in batch["residual_pii"] if f["severity"] == "fail"}
+    assert failed == {c for c, _ in columns}
+
+
+@pytest.mark.parametrize("arrow_type", [pa.int64(), pa.uint64()])
+def test_big_nullable_integers_get_the_same_verdict_on_the_resident_and_batch_gates(
+    arrow_type: pa.DataType, tmp_path: Path
+):
+    from decoy_engine.execution.pipeline.post_scan._suite import suite_frames
+
+    big = 2**53
+    src = pa.table({"n": pa.array([big, big + 2, None], arrow_type)})
+    out = pa.table({"n": pa.array([big + 1, big + 2, None], arrow_type)})
+    config = _cfg(("n", "redact"))
+    src_frames, out_frames = suite_frames({"t": src}, {"t": out}, ["t"])
+    resident = run_post_mask(src_frames, out_frames, config=config)
+    batch = run_post_mask_tables(
+        {"t": from_table("t", src)},
+        {"t": from_table("t", out)},
+        config=config,
+        keys=(),
+        scratch=tmp_path,
+        memory_limit=LIMIT,
+    )
+    for report in (resident, batch):
+        report.pop("generated_at")
+    assert resident == batch
+    # Compared exactly, the columns differ in one row, so they are not byte-identical.
+    facts = column_facts(
+        from_table("t", src), from_table("t", out), ["n"], scratch=tmp_path, memory_limit=LIMIT
+    )["n"]
+    assert not facts.bytes_identical
+    assert (out_frames["t"]["n"].astype(object).dropna().tolist()) == [big + 1, big + 2]

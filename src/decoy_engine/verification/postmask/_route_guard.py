@@ -51,7 +51,6 @@ def refuse_unchecked_route(config: Mapping[str, Any], route: str) -> None:
     setting = post_scan_model_setting(config)
     if setting is None:
         return
-    # Lazy: the helper sits in the secret-provider package, which this module need not load.
-    from decoy_engine.secret_providers._errors import raise_bare
+    from decoy_engine._error_base import raise_bare
 
     raise_bare(PostScanRouteError(route, setting))

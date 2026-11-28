@@ -40,8 +40,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import fileaccess
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
@@ -49,7 +51,7 @@ from decoy_engine.profile._fixed_width_reader import (
 from decoy_engine.profile._lazy_identity import check_batch_rows
 from decoy_engine.profile._policy_bound import _PolicyBound
 from decoy_engine.profile._readers_csv import CsvFileSource, estimate_csv_rows
-from decoy_engine.profile.arrow import head_table_from_batches
+from decoy_engine.profile.arrow import head_table_from_batches, sample_table_frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -412,10 +414,12 @@ class ParquetFileSource(_PolicyBound):
         )
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return self.sample_table(sample_rows).to_pandas()
+        return sample_table_frame(self.sample_table(sample_rows))
 
     def to_frame(self) -> pd.DataFrame:
-        return self._lazy().to_table().to_pandas()
+        return arrow_to_frame(
+            self._lazy().to_table(), on_unrepresentable=source_column_unrepresentable()
+        )
 
 
 @dataclass(frozen=True)

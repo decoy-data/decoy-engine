@@ -24,7 +24,8 @@ from tests.sentry.release import _census as census
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACT = (ROOT / "docs" / "compatibility-contract.md").read_text(encoding="utf-8")
-MIN_PACKAGES, MIN_NAMES = 59, 1186
+MIN_PACKAGES = 59
+MIN_NAMES = 1186
 
 
 @pytest.fixture(scope="module")

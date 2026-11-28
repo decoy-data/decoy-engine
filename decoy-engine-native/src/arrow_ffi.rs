@@ -51,7 +51,7 @@ fn to_py_err(err: KernelError) -> PyErr {
 /// Import a Python `pa.Array`-shaped object into an arrow-rs `ArrayRef`, over the Arrow
 /// C Data Interface. Never panics: an internal panic from arrow-rs's own FFI import path is
 /// caught and converted to a `KernelError`.
-fn import_array(obj: &Bound<'_, PyAny>) -> Result<ArrayRef, KernelError> {
+pub(crate) fn import_array(obj: &Bound<'_, PyAny>) -> Result<ArrayRef, KernelError> {
     let call = obj.call_method0("__arrow_c_array__").map_err(|e| {
         KernelError::ProtocolError(format!(
             "expected an object implementing __arrow_c_array__ (a pyarrow Array); {e}"
@@ -95,7 +95,10 @@ fn import_array(obj: &Bound<'_, PyAny>) -> Result<ArrayRef, KernelError> {
 
 /// Export arrow-rs array data back to Python as a `pa.Array`, over the same C Data Interface
 /// boundary, via `pa.Array._import_from_c_capsule`. Shared by the string and index kernels.
-fn export_array_data(py: Python<'_>, data: arrow_data::ArrayData) -> PyResult<Py<PyAny>> {
+pub(crate) fn export_array_data(
+    py: Python<'_>,
+    data: arrow_data::ArrayData,
+) -> PyResult<Py<PyAny>> {
     let (ffi_array, ffi_schema) = to_ffi(&data)
         .map_err(|e| PyValueError::new_err(format!("failed to export the derived column: {e}")))?;
     let schema_capsule = PyCapsule::new_with_value(py, ffi_schema, ARROW_SCHEMA_CAPSULE_NAME)?;

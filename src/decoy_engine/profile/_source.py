@@ -33,9 +33,10 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from decoy_engine import fileaccess, reason_adapter
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine._field_names import DuplicateFieldNamesError
 from decoy_engine._lexeme import profile_descriptors
 from decoy_engine.contracts.column_shape import source_format_for
@@ -45,6 +46,7 @@ from decoy_engine.profile._declared_columns import (
     PreparedDeclaredSources,
     prepare_declared_sources,
 )
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._readers import (
     BOUNDED_FALLBACK_ROWS,
     LazySource,
@@ -322,6 +324,18 @@ def _profile_one_source(
     return result
 
 
+class _Unconvertible(Exception):
+    """The whole-sample conversion found a column pandas cannot hold (raised by the callback)."""
+
+    def __init__(self, column: str | None) -> None:
+        super().__init__("sample not convertible")
+        self.column = column
+
+
+def _park_unconvertible(column: str | None) -> NoReturn:
+    raise _Unconvertible(column) from None
+
+
 def _profile_bounded(
     reader: ProfileSource,
     *,
@@ -331,13 +345,13 @@ def _profile_bounded(
     sample_rows: int,
     rng: random.Random,
     source_format: str | None,
-) -> TableProfile | str:
+) -> TableProfile:
     """The bounded profile: the true row count, one `<= sample_rows` sample, the pandas walk.
 
     A Parquet reader hands over the sample as a table and it is converted here, so a failed
-    conversion can try `recover_temporal_profile` on the same table. The return is the profile,
-    or, when neither the whole conversion nor the recovery gave one, the closed label of the
-    whole-conversion failure (the caller raises it once no handler is active)."""
+    conversion can try `recover_temporal_profile` on the same table. When neither the whole
+    conversion nor the recovery gives a profile, the coded `source_column_unrepresentable`
+    error is raised once the conversion's handler has closed."""
     row_count = reader.row_count()
     # The profiled frame is parsed from exactly the cap, so no later row can change a
     # column's inferred type. An estimated row count (CSV) can undershoot the sample, so
@@ -345,18 +359,16 @@ def _profile_bounded(
     # counted, never profiled. An exact count already says the source is larger.
     table = reader.sample_table(sample_rows) if isinstance(reader, ArrowSampleSource) else None
     sample_df: pd.DataFrame | None = None
-    failure = ""
+    unconvertible: _Unconvertible | None = None
     if table is None:
         sample_df = reader.sample_frame(sample_rows)
+        proven_total = len(sample_df)
     else:
+        proven_total = table.num_rows
         try:
-            sample_df = table.to_pandas()
-        except (ValueError, OverflowError) as exc:
-            # A memory failure is not a pandas limit: leave it to the classifier above.
-            if fileaccess.is_conversion_memory_failure(exc):
-                raise
-            failure = safe_error_type(exc).value
-    proven_total = len(table) if table is not None else len(sample_df)  # type: ignore[arg-type]
+            sample_df = arrow_to_frame(table, on_unrepresentable=_park_unconvertible)
+        except _Unconvertible as exc:
+            unconvertible = exc
     if (
         not row_count.exact
         and proven_total == sample_rows
@@ -386,7 +398,7 @@ def _profile_bounded(
 
     if sample_df is not None:
         profile = walk(sample_df)
-    else:
+    elif table is not None and unconvertible is not None:
         # The whole-sample conversion failed; only the one flat-temporal case recovers.
         recovered = recover_temporal_profile(
             table,
@@ -398,8 +410,11 @@ def _profile_bounded(
             walk_frame=walk,
         )
         if recovered is None:
-            return failure
+            # Raised after the conversion handler closed: the coded error names the column only.
+            source_column_unrepresentable()(unconvertible.column)
         profile = recovered
+    else:
+        raise AssertionError("a sample is a frame or a failed table")
     return replace(profile, row_count_exact=row_count.exact)
 
 

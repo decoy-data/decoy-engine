@@ -2,7 +2,7 @@
 contract.
 
 A Parquet reader hands the bounded profile the `pa.Table` it converts to pandas. The profile
-converts it exactly as the reader's `sample_frame` does; only when that fails on a flat
+converts it with `arrow_to_frame`, as the reader's `sample_frame` does; only when that fails on a flat
 temporal schema does it read the table column by column (`profile.arrow._recovery`).
 """
 
@@ -11,7 +11,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
+import pandas as pd
 import pyarrow as pa
+
+from decoy_engine._execution_error import source_column_unrepresentable
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 
 
 def head_table_from_batches(
@@ -34,6 +38,12 @@ def head_table_from_batches(
         return schema.empty_table()
     table = pa.Table.from_batches(collected)
     return table.slice(0, sample_rows) if table.num_rows > sample_rows else table
+
+
+def sample_table_frame(table: pa.Table) -> pd.DataFrame:
+    """A bounded sample as a DataFrame through the one source-read conversion; a column pandas
+    cannot hold is a coded error naming it."""
+    return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 @runtime_checkable

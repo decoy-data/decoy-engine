@@ -50,9 +50,7 @@ class RegexMatchFold(ColumnFold):
         try:
             self._compiled = re.compile(pattern_raw)
         except re.error as exc:
-            raise ValueError(
-                f"regex_match validator: params.pattern is not a valid regex: {exc}"
-            ) from exc
+            raise ValueError("regex_match validator: params.pattern is not a valid regex.") from exc
         self._pattern = pattern_raw
 
     def failing_positions(self, values: list[Any]) -> Iterable[int]:

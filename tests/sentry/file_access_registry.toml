@@ -1139,7 +1139,7 @@ reason = "pyarrow and pandas readers over `io.BytesIO` of data fetched from S3/G
 [[entry]]
 module = "decoy_engine/profile/_cloud_readers.py"
 function = "S3ParquetSource.to_frame"
-sink = "pandas.read_parquet"
+sink = "pyarrow.parquet.read_table"
 ordinal = 0
 rule = "in-memory bytes buffer holding a cloud object's range; no file is opened"
 owner = "cam"
@@ -1157,7 +1157,7 @@ reason = "pyarrow and pandas readers over `io.BytesIO` of data fetched from S3/G
 [[entry]]
 module = "decoy_engine/profile/_cloud_readers.py"
 function = "GcsParquetSource.to_frame"
-sink = "pandas.read_parquet"
+sink = "pyarrow.parquet.read_table"
 ordinal = 0
 rule = "in-memory bytes buffer holding a cloud object's range; no file is opened"
 owner = "cam"

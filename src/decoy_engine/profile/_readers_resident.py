@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
-from decoy_engine import fileaccess
+from decoy_engine._execution_error import source_column_unrepresentable
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._readers import RowCount
 
 if TYPE_CHECKING:
@@ -15,23 +16,8 @@ if TYPE_CHECKING:
 
 
 def _frame_of(table: pa.Table) -> pd.DataFrame:
-    """`table` as a DataFrame; a column pandas cannot hold (a date past year 9999, a
-    sub-microsecond time) is profiled as text, so the route that never converts still runs."""
-    try:
-        return table.to_pandas()
-    except (ValueError, OverflowError) as exc:
-        if fileaccess.is_conversion_memory_failure(exc):
-            raise
-        columns = []
-        for column in table.columns:
-            try:
-                column.to_pandas()
-            except (ValueError, OverflowError) as column_exc:
-                if fileaccess.is_conversion_memory_failure(column_exc):
-                    raise
-                column = column.cast(pa.string())
-            columns.append(column)
-        return pa.Table.from_arrays(columns, names=table.column_names).to_pandas()
+    """`table` as a DataFrame; a column pandas cannot hold is a coded error naming the column."""
+    return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 @dataclass(frozen=True)

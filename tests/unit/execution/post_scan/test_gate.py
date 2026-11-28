@@ -18,8 +18,8 @@ from decoy_engine import reasons
 from decoy_engine.config import post_scan_gate_applies
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.execution.out_of_core import resolve_ooc_memory_limit
-from decoy_engine.execution.pipeline import _post_scan
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.verification.postmask import PostScanBlockedError, TableBatches, from_table
 
 CANARY = "CANARY-31c4"

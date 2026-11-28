@@ -24,15 +24,17 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine._lexeme import LEXEME_KEY, pandas_lexeme_kwargs
 from decoy_engine.connectors import _clients
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._readers import (
     PROOF_READ_ERRORS,
     ProfileSource,
     RowCount,
     estimate_csv_rows,
 )
-from decoy_engine.profile.arrow import head_table_from_batches
+from decoy_engine.profile.arrow import head_table_from_batches, sample_table_frame
 
 # One ranged read big enough to cover a CSV header + a bounded sample on a
 # typical object, while still being a tiny fraction of a large file. read_csv
@@ -266,11 +268,12 @@ class S3ParquetSource:
         return _read_parquet_sample(size, fetch, sample_rows)
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return self.sample_table(sample_rows).to_pandas()
+        return sample_table_frame(self.sample_table(sample_rows))
 
     def to_frame(self) -> pd.DataFrame:
         client = _s3_for(self._descriptor)
-        return pd.read_parquet(io.BytesIO(_s3_full(client, self._bucket, self._key)))
+        table = pq.read_table(io.BytesIO(_s3_full(client, self._bucket, self._key)))
+        return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 class S3CsvSource:
@@ -389,12 +392,13 @@ class GcsParquetSource:
         )
 
     def sample_frame(self, sample_rows: int) -> pd.DataFrame:
-        return self.sample_table(sample_rows).to_pandas()
+        return sample_table_frame(self.sample_table(sample_rows))
 
     def to_frame(self) -> pd.DataFrame:
         with _clients.gcs_client() as client:
             data = _clients.gcs_download(_gcs_blob(self._descriptor, client))
-        return pd.read_parquet(io.BytesIO(data))
+        table = pq.read_table(io.BytesIO(data))
+        return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 class GcsCsvSource:

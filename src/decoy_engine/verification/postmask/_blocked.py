@@ -340,7 +340,6 @@ def raise_if_ner_blocked(report: Mapping[str, Any], *, ner_findings: str) -> Non
     error = blocked_error(report, verdict) if _NER_BLOCKED in verdict.codes else None
     if error is None:
         return
-    # Lazy: the helper sits in the secret-provider package, which this module need not load.
-    from decoy_engine.secret_providers._errors import raise_bare
+    from decoy_engine._error_base import raise_bare
 
     raise_bare(error)
