@@ -67,10 +67,10 @@ import pyarrow.compute as pc
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState
-from decoy_engine.execution._column_access import handler_written_columns
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._runner import group_by_sibling
 from decoy_engine.execution._strategies._redact import redact_with_is_string
+from decoy_engine.plan.column_access import handler_written_columns
 
 _STRING_OUTPUT_STRATEGIES = frozenset({"hash", "truncate", "redact"})
 

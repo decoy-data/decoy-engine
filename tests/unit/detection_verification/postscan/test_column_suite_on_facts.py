@@ -24,7 +24,7 @@ from decoy_engine.verification.postmask import (
 )
 from decoy_engine.verification.postmask import _column_facts as column_facts_module
 from decoy_engine.verification.postmask import runner as runner_module
-from decoy_engine.verification.postmask._column_facts import column_facts
+from decoy_engine.verification.postmask._column_facts import column_facts, standalone_writes
 from decoy_engine.verification.postmask.policy_validation import (
     check_policy_validation,
     policy_findings,
@@ -38,6 +38,12 @@ CANARY = "CANARY-7f3a"
 LIMIT = "256MB"
 EMAILS = [f"user{i}@realmail.com" for i in range(100)]
 FAKE = [f"fake{i}@masked.example" for i in range(100)]
+
+
+def _findings(facts, config, failed=None):
+    """`residual_pii_findings` with the writer query the frame path computes for these tables."""
+    schemas = {table: list(columns) for table, columns in facts.items()}
+    return residual_pii_findings(facts, config, failed, writes=standalone_writes(config, schemas))
 
 
 def _cfg(*columns: tuple[str, str]) -> dict[str, Any]:
@@ -133,7 +139,7 @@ FIXTURES = {
 def test_the_facts_checks_equal_the_resident_frame_checks(name: str, size: int, tmp_path: Path):
     src, out, config = FIXTURES[name]
     src_t, out_t, facts = _facts(src, out, size, tmp_path)
-    assert residual_pii_findings(facts, config) == check_residual_pii(
+    assert _findings(facts, config) == check_residual_pii(
         {"t": out}, config, source_frames={"t": src}
     )
     assert policy_findings(config, src_t, out_t, facts) == check_policy_validation(
@@ -156,7 +162,7 @@ def test_run_post_mask_reports_what_the_frame_checks_report(name: str):
 def test_a_table_without_a_source_gets_the_detector_findings_only(tmp_path: Path):
     _src, out, config = FIXTURES["unconfigured"]
     _s, _o, facts = _facts(None, out, 7, tmp_path)
-    (finding,) = residual_pii_findings(facts, config)
+    (finding,) = _findings(facts, config)
     assert finding.source_compared is False and finding.severity == "warning"
     assert (
         policy_findings(config, {}, {"t": from_table("t", pa.Table.from_pandas(out))}, facts) == []
@@ -169,7 +175,7 @@ def test_a_column_near_min_rate_escalates_as_on_the_resident_path(tmp_path: Path
     src_df, out_df = pd.DataFrame({"email": EMAILS}), pd.DataFrame({"email": out})
     config = _cfg(("email", "faker"))
     src_t, out_t, facts = _facts(src_df, out_df, 7, tmp_path)
-    (finding,) = residual_pii_findings(facts, config)
+    (finding,) = _findings(facts, config)
     assert finding.severity == "warning"
     assert finding.source_identity_rate == 0.06
     assert [finding] == check_residual_pii({"t": out_df}, config, source_frames={"t": src_df})
@@ -186,7 +192,7 @@ def test_an_integer_column_holding_a_null_is_read_as_whole_numbers(tmp_path: Pat
     config = _cfg(("zip", "faker"))
     src_t, out_t = from_table("t", src), from_table("t", out)
     facts = {"t": column_facts(src_t, out_t, ["zip"], scratch=tmp_path, memory_limit=LIMIT)}
-    moved = residual_pii_findings(facts, config)
+    moved = _findings(facts, config)
     old = check_residual_pii({"t": out.to_pandas()}, config, source_frames={"t": src.to_pandas()})
     assert [f.detector_id for f in moved] == ["us_zip"]
     assert old == []
@@ -216,7 +222,8 @@ def test_a_coded_error_in_the_facts_pass_propagates_as_the_same_object(
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise error
 
-    monkeypatch.setattr(column_facts_module, "column_distinct", boom)
+    # A frame's distinct counts are read from its cells, before the batch pass.
+    monkeypatch.setattr(column_facts_module, "distinct_values", boom)
     src, out, config = FIXTURES["synthetic_faker"]
     with pytest.raises(FileAccessReadError) as info:
         run_post_mask({"t": src}, {"t": out}, config=config)
@@ -319,15 +326,15 @@ def test_an_unconfigured_list_or_map_column_leaves_the_other_columns_findings(ce
     assert ("ssn", "fail") in {(f["column"], f["severity"]) for f in report["residual_pii"]}
 
 
-def test_a_configured_list_column_gets_its_own_policy_error_only():
+def test_a_configured_list_column_is_compared_like_any_other():
+    """List cells compare as lists on both paths, so a hash that left them unchanged fails."""
     frame = pa.table(
         {"ssn": SSN, "cells": pa.array([[1, 2], [3]] * 15, pa.list_(pa.int64()))}
     ).to_pandas()
     config = _cfg(("ssn", "faker"), ("cells", "hash"))
     report = run_post_mask({"t": frame}, {"t": frame}, config=config)
     by_column = {f["column"]: f for f in report["policy_validation"]}
-    assert by_column["cells"]["severity"] == "error"
-    assert "ValueError" in by_column["cells"]["message"]
+    assert by_column["cells"]["severity"] == "fail"
     assert by_column["ssn"]["severity"] == "fail"
     assert ("ssn", "fail") in {(f["column"], f["severity"]) for f in report["residual_pii"]}
 
@@ -404,16 +411,37 @@ def test_a_failed_source_comparison_is_an_error_finding_not_a_quiet_downgrade(
     assert "RuntimeError" in finding["message"] and CANARY not in repr(report)
 
 
-def test_a_failed_distinct_count_keeps_the_valid_identity_rate(monkeypatch: pytest.MonkeyPatch):
+def _distinct_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("distinct failed")
 
+    # Both readers: the batch pass counts with DuckDB, a resident frame from its cells.
     monkeypatch.setattr(column_facts_module, "column_distinct", boom)
+    monkeypatch.setattr(column_facts_module, "distinct_values", boom)
+
+
+def test_a_failed_distinct_count_that_decides_the_grade_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Full identity fails a varied source and is fine on a constant one, so an uncounted
+    source is neither: the check reports that it could not decide, and keeps the rate."""
+    _distinct_fails(monkeypatch)
     frame = pd.DataFrame({"email": EMAILS})
     report = run_post_mask({"t": frame}, {"t": frame}, config=_cfg(("email", "faker")))
     (finding,) = report["residual_pii"]
-    assert finding["severity"] == "fail" and finding["source_compared"] is True
-    assert finding["source_identity_rate"] == 1.0
+    assert finding["severity"] == "error" and finding["source_compared"] is True
+    assert finding["source_identity_rate"] == 1.0 and "RuntimeError" in finding["message"]
+
+
+def test_a_failed_distinct_count_that_cannot_change_the_grade_keeps_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _distinct_fails(monkeypatch)
+    src = pd.DataFrame({"email": EMAILS})
+    out = pd.DataFrame({"email": FAKE})
+    report = run_post_mask({"t": src}, {"t": out}, config=_cfg(("email", "faker")))
+    (finding,) = report["residual_pii"]
+    assert finding["severity"] == "info" and finding["source_identity_rate"] == 0.0
 
 
 def test_a_column_converted_natively_on_one_side_only_still_compares_equal_values():
@@ -489,7 +517,8 @@ def test_run_post_mask_tables_refuses_a_zero_memory_limit(tmp_path: Path):
 def test_a_failed_output_count_does_not_make_a_constant_source_escalate(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    real = column_facts_module.column_distinct
+    # A resident frame counts source then output from its cells, one call per column.
+    real = column_facts_module.distinct_values
     calls = {"n": 0}
 
     def second_fails(*args: Any, **kwargs: Any) -> Any:
@@ -498,7 +527,7 @@ def test_a_failed_output_count_does_not_make_a_constant_source_escalate(
             raise RuntimeError("output count failed")
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(column_facts_module, "column_distinct", second_fails)
+    monkeypatch.setattr(column_facts_module, "distinct_values", second_fails)
     frame = pd.DataFrame({"email": [EMAILS[0]] * 40})
     report = run_post_mask({"t": frame}, {"t": frame}, config=_cfg(("email", "faker")))
     (finding,) = report["residual_pii"]

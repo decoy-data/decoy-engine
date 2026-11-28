@@ -20,9 +20,10 @@ quarantine breaks. Aggregates only: no value reaches a field here.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -31,12 +32,28 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine._execution_error import ExecutionError, postmask_not_inspectable
 from decoy_engine.detection.detectors import counting_scope, decide_detector, run_all_detectors
-from decoy_engine.internal.pandas_compat import (
-    arrow_to_series,
-    exact_int_types_mapper,
+from decoy_engine.internal.cell_identity import (
+    CellNotComparableError,
+    Column,
+    DistinctBudgetError,
+    DistinctCounter,
+    IdentityFacts,
+    IdentityFailure,
+    distinct_values,
+    duckdb_countable,
+    identity_facts,
+)
+from decoy_engine.internal.cell_text import UnreadableCellError
+from decoy_engine.internal.memory_limit import parse_megabytes
+from decoy_engine.internal.pandas_compat import arrow_to_series, exact_int_types_mapper
+from decoy_engine.plan.column_access import (
+    TableWrites,
+    config_child_keys,
+    written_columns_by_table,
 )
 from decoy_engine.profiling import KEY_BATCH_ROWS, column_distinct, passes_through
-from decoy_engine.verification.postmask._stream_input import TableBatches, key_batches
+from decoy_engine.providers_v2 import get_default_registry
+from decoy_engine.verification.postmask._stream_input import CellView, TableBatches, key_batches
 
 
 @dataclass(frozen=True)
@@ -194,14 +211,18 @@ class ColumnFacts:
 
     @property
     def source_constant(self) -> bool:
-        return self.source_distinct <= 1
+        return self.constant(self.source_distinct)
+
+    @staticmethod
+    def constant(distinct: int) -> bool:
+        """The one constant-source rule: with at most one distinct source value, an unchanged
+        cell says nothing about whether the mask ran."""
+        return distinct <= 1
 
 
 @dataclass
 class _Tally:
-    comparable: int = 0
-    identical: int = 0
-    same_bytes: bool = True
+    identity: IdentityFacts | None = None
     error: str | None = None
     # True when the output column itself could not be read (no detectors, no values).
     unreadable: bool = False
@@ -214,42 +235,21 @@ class _Tally:
 
 
 _NOT_INSPECTABLE_CODE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+_DISTINCT_LIMIT_CODE = reasons.quality.HIGH_CARDINALITY_DISTINCT_LIMIT_EXCEEDED
 _LENGTH_MISMATCH_CODE = reasons.runtime.POSTMASK_SOURCE_LENGTH_MISMATCH
 
 
-def _output_series(
-    src_batch: pa.RecordBatch | None, out_batch: pa.RecordBatch, column: str, tally: _Tally
-) -> pd.Series:
-    """The output column as a series, with the identity tally run against the source when the
-    column is compared. The dtype comes from the schema, so a null in one batch cannot retype an
-    integer column. An output column pandas cannot hold raises the
-    `postmask_column_not_inspectable` error. A source column it cannot hold only marks the tally,
-    so the output is still read and its detectors still run."""
-    out_s = _read(out_batch, column)
-    if src_batch is None or tally.error is not None:
-        return out_s
-    try:
-        src_s = _read(src_batch, column)
-    except ExecutionError as exc:
-        if exc.code != _NOT_INSPECTABLE_CODE:
-            raise
-        tally.error = exc.code
-        tally.not_inspectable = True
-        return out_s
-    try:
-        _add_identity(tally, src_s, out_s)
-    except Exception as exc:
-        # One column that cannot be compared (a list or map cell, say) must not take the other
-        # columns down with it.
-        if passes_through(exc):
-            raise
-        tally.error = type(exc).__name__
-    return out_s
+def _column(batch: pa.RecordBatch, column: str) -> pa.Array:
+    # By first position: a repeated name is matched by its first field, as on the frame path.
+    return batch.column(batch.schema.names.index(column))
 
 
-def _read(batch: pa.RecordBatch, column: str) -> pd.Series:
+def _series(batch: pa.RecordBatch, column: str) -> pd.Series:
+    """The output column as a series for the detectors. The dtype comes from the schema, so a null
+    in one batch cannot retype an integer column. A column pandas cannot hold raises the
+    `postmask_column_not_inspectable` error."""
     return arrow_to_series(
-        batch.column(batch.schema.get_field_index(column)),
+        _column(batch, column),
         on_unrepresentable=postmask_not_inspectable,
         types_mapper=exact_int_types_mapper,
         name=column,
@@ -293,17 +293,36 @@ def _aligned(
         a, b = a.slice(n), b.slice(n)
 
 
-def _add_identity(tally: _Tally, src: pd.Series, out: pd.Series) -> None:
-    src_o, out_o = src.astype(object), out.astype(object)
-    present = src_o.notna() & out_o.notna()
-    tally.comparable += int(present.sum())
-    tally.identical += int((src_o[present] == out_o[present]).sum())
-    # A null is NaN in a float column and pd.NA in an Arrow-typed integer one; `equals` treats
-    # NaN and None as one null but not NaN and pd.NA, so a float source against an int output of
-    # the same numbers would read as different.
-    tally.same_bytes = tally.same_bytes and bool(
-        src_o.where(src_o.notna(), None).equals(out_o.where(out_o.notna(), None))
-    )
+def compare_or_failure(src: Column, out: Column) -> IdentityFacts | IdentityFailure:
+    """`identity_facts`, or the failure's class name. A coded error passes through unchanged. A
+    cell the authority cannot read is `postmask_column_not_inspectable`, as the batch reader's."""
+    try:
+        return identity_facts(src, out)
+    except UnreadableCellError:
+        return IdentityFailure(_NOT_INSPECTABLE_CODE)
+    except Exception as exc:
+        if passes_through(exc):
+            raise
+        return IdentityFailure(type(exc).__name__)
+
+
+def cell_view(series: pd.Series) -> CellView:
+    """The distinct count of a frame column's own cells, and whether the authority refused them
+    (a record, a cycle): a refused column reaches no Arrow conversion, detector or tally."""
+    try:
+        return CellView(distinct_values(series), None)
+    except Exception as exc:
+        if passes_through(exc):
+            raise
+        refused = type(exc).__name__ if isinstance(exc, CellNotComparableError) else None
+        return CellView(0, type(exc).__name__, refused)
+
+
+def _add_identity(tally: _Tally, facts: IdentityFacts | IdentityFailure) -> None:
+    if isinstance(facts, IdentityFailure):
+        tally.error = facts.error
+    elif tally.error is None:
+        tally.identity = facts if tally.identity is None else tally.identity.merge(facts)
 
 
 def _add_detectors(tally: _Tally, out: pd.Series, column: str) -> None:
@@ -347,20 +366,54 @@ def _counted(table: TableBatches) -> tuple[TableBatches, Callable[[], None]]:
     return replace(table, read=read), verify
 
 
-def _distinct_or_error(
-    table: TableBatches, column: str, scratch: Path, limit: str
-) -> tuple[int, str | None]:
-    """The count and no error, or zero and the class name of an uncoded failure counting this one
-    column. A short or long stream is not such a failure: `verify` refuses it for every column."""
-    counted, verify = _counted(table)
+def _count_or_error(count: Callable[[], int]) -> tuple[int, str | None]:
+    """`count()` and no error, or zero and the class name of an uncoded failure of that count. A
+    count over its memory budget is its own reason, never an out-of-memory."""
     try:
-        count = column_distinct(key_batches(counted, [column]), scratch=scratch, memory_limit=limit)
+        return count(), None
+    except DistinctBudgetError:
+        return 0, _DISTINCT_LIMIT_CODE
     except Exception as exc:
         if passes_through(exc):
             raise
         return 0, type(exc).__name__
-    verify()
-    return count, None
+
+
+def cells_distinct_or_error(series: pd.Series) -> tuple[int, str | None]:
+    """The distinct count of the cells of a frame column, or zero and the class name of the
+    failure."""
+    return _count_or_error(lambda: distinct_values(series))
+
+
+def _distinct_or_error(
+    table: TableBatches, column: str, scratch: Path, limit: str
+) -> tuple[int, str | None]:
+    """The count and no error, or zero and the class name of an uncoded failure counting this one
+    column. A frame column reads the count of its own cells (`CellView`). A batch column of a type
+    DuckDB counts exactly goes to DuckDB; any other is counted on the value forms within the
+    memory limit. A short or long stream is not such a failure: `verify` refuses it."""
+    view = table.cell_views.get(column)
+    if view is not None:
+        return view.distinct, view.distinct_error
+    counted, verify = _counted(table)
+    if duckdb_countable(table.schema.types[table.schema.names.index(column)]):
+        count, error = _count_or_error(
+            lambda: column_distinct(
+                key_batches(counted, [column]), scratch=scratch, memory_limit=limit
+            )
+        )
+    else:
+        count, error = _count_or_error(lambda: _exact_distinct(counted, column, limit))
+    if error is None:
+        verify()
+    return count, error
+
+
+def _exact_distinct(table: TableBatches, column: str, limit: str) -> int:
+    counter = DistinctCounter((parse_megabytes(limit) or 0) * 2**20)
+    for batch in table.read([column], KEY_BATCH_ROWS):
+        counter.add(_column(batch, column))
+    return counter.count()
 
 
 def column_facts(
@@ -372,13 +425,16 @@ def column_facts(
     scratch: Path,
     memory_limit: str,
     value_columns: Collection[str] | None = None,
+    identity: Mapping[str, IdentityFacts | IdentityFailure] | None = None,
 ) -> dict[str, ColumnFacts]:
     """Facts for each of `columns` that the output has, keyed by column name.
 
     `value_columns` names the columns whose output null counts and moments are tallied
     (`ColumnFacts.output_values`); `None` tallies every column. The run passes only the columns
-    a distribution check reads, so an unconfigured run pays nothing for them."""
-    wanted = [c for c in columns if c in output.schema.names]
+    a distribution check reads, so an unconfigured run pays nothing for them. `identity` holds
+    the identity a frame caller computed on its original cells, before any conversion; then the
+    source batches are not read for identity."""
+    wanted = list(dict.fromkeys(c for c in columns if c in output.schema.names))
     if not wanted:
         return {}
     compared = [c for c in wanted if source is not None and c in source.schema.names]
@@ -390,7 +446,10 @@ def column_facts(
     }
     out_read, out_verify = _counted(output)
     checks = [out_verify]
-    if aligned and source is not None and compared:
+    if aligned and identity is not None:
+        for c in compared:
+            _add_identity(tallies[c], identity.get(c, IdentityFailure("KeyError")))
+    if aligned and source is not None and compared and identity is None:
         src_read, src_verify = _counted(source)
         checks.append(src_verify)
 
@@ -405,20 +464,29 @@ def column_facts(
             lengths_differ,
         )
     else:
-        compared = []
+        if not (aligned and identity is not None):
+            compared = []
         pairs = ((None, b) for b in out_read.read(wanted, batch_rows))
+    refused = {
+        c: v.refused for c in wanted if (v := output.cell_views.get(c)) is not None and v.refused
+    }
     for src_batch, out_batch in pairs:
         for c in wanted:
-            if tallies[c].unreadable:
-                continue  # a batch already showed this column cannot be read
-            try:
-                out_s = _output_series(
-                    src_batch if c in compared else None, out_batch, c, tallies[c]
+            if src_batch is not None and c in compared and tallies[c].error is None:
+                # Typed arrays straight to the authority; one column that cannot be compared does
+                # not take the other columns down with it.
+                _add_identity(
+                    tallies[c], compare_or_failure(_column(src_batch, c), _column(out_batch, c))
                 )
+            if c in refused or tallies[c].unreadable:
+                # A placeholder for refused cells, or a column a batch already showed is unreadable.
+                continue
+            try:
+                out_s = _series(out_batch, c)
             except ExecutionError as exc:
                 if exc.code != _NOT_INSPECTABLE_CODE:
                     raise
-                # An earlier length mismatch keeps `error`; the failure is recorded either way.
+                # An earlier comparison failure keeps `error`; the failure is recorded either way.
                 tallies[c].error = tallies[c].error or exc.code
                 tallies[c].not_inspectable = True
                 tallies[c].unreadable = True
@@ -426,7 +494,7 @@ def column_facts(
             _add_detectors(tallies[c], out_s, c)
             values = tallies[c].values
             if values is not None:
-                values.add(out_batch.column(out_batch.schema.get_field_index(c)))
+                values.add(_column(out_batch, c))
     for check in checks:
         check()
     facts = {}
@@ -441,14 +509,17 @@ def column_facts(
                 distinct[n], err = _distinct_or_error(table, c, scratch, memory_limit)
                 distinct_failed = distinct_failed or err
                 source_failed = source_failed or (n == 0 and err is not None)
+        same = t.identity if t.identity is not None else IdentityFacts(0, 0, True)
+        if c in refused and t.error is None:
+            t.error = refused[c]
         facts[c] = ColumnFacts(
             table=output.name,
             column=c,
             source_rows=source.num_rows if source is not None else 0,
             output_rows=output.num_rows,
-            comparable_rows=0 if t.error else t.comparable,
-            identical_rows=0 if t.error else t.identical,
-            bytes_identical=aligned and c in compared and t.same_bytes and not t.error,
+            comparable_rows=0 if t.error else same.comparable,
+            identical_rows=0 if t.error else same.identical,
+            bytes_identical=aligned and c in compared and same.all_same and not t.error,
             source_distinct=distinct[0],
             output_distinct=distinct[1],
             detectors=_fired(t),
@@ -458,7 +529,7 @@ def column_facts(
             distinct_error=(_NOT_INSPECTABLE_CODE if t.not_inspectable else None)
             or distinct_failed,
             source_distinct_failed=source_failed,
-            output_values=t.values.done() if t.values is not None else None,
+            output_values=t.values.done() if t.values is not None and c not in refused else None,
         )
     return facts
 
@@ -489,6 +560,20 @@ def value_facts(
     counted, verify = _counted(table)
     for batch in counted.read(wanted, batch_rows):
         for c in wanted:
-            tallies[c].add(batch.column(batch.schema.get_field_index(c)))
+            tallies[c].add(_column(batch, c))
     verify()
     return {c: t.done() for c, t in tallies.items()}
+
+
+def standalone_writes(
+    config: Mapping[str, Any], schemas: Mapping[str, Sequence[str]]
+) -> dict[str, TableWrites]:
+    """The writer query for a caller with no compiled run: the tables' field names, the edges
+    the config expands to and the default provider registry, the inputs a run with that config
+    compiles. Relationships that do not expand give no answer, so no column is proven unwritten."""
+    edges = config_child_keys(config)
+    if edges is None:
+        return {}
+    return written_columns_by_table(
+        config, schemas=schemas, edges=edges, registry=get_default_registry()
+    )

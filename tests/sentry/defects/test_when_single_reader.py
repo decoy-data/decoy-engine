@@ -1,7 +1,7 @@
 # ruff: noqa: RUF001 - the fullwidth and ligature spellings are the subject of these tests
 """AT-S1e: a `when:` predicate's declared reads are the columns the evaluator reads.
 
-`_column_access._when` is built on `when_column_refs`, the one producer of `WhenRead`, so the
+`plan.column_access._when` is built on `when_column_refs`, the one producer of `WhenRead`, so the
 chunk carry, the native admission and the evaluator's alias map cannot disagree. A read the
 declaration misses would get a null placeholder and silently change the mask. The generic
 pandas-expression scanner (`predicate_names`) serves derived and transform expressions, a
@@ -17,9 +17,9 @@ import pyarrow as pa
 import pytest
 
 from decoy_engine.errors import ValidationError
-from decoy_engine.execution._column_access import _READS_UNKNOWN, SURFACE_DECLARATIONS
 from decoy_engine.execution._when_gate import _aliased_frame
 from decoy_engine.expressions._when_parser import alias_reads, parse_when
+from decoy_engine.plan.column_access._declarations import _READS_UNKNOWN, SURFACE_DECLARATIONS
 from tests.native._chunked_entry_support import make_config, passthrough, redact
 from tests.native._rev9_support import run_entry_below_gate, run_public_below_gate, same_column
 

@@ -302,6 +302,10 @@ id = "faker-native-allowlist-total"
 baseline = "tests/sentry/baselines/faker-native-allowlist-total.json"
 
 [[sentry]]
+id = "cell-text-names"
+baseline = "tests/sentry/baselines/cell-text-names.json"
+
+[[sentry]]
 id = "config-refusal-text"
 baseline = "tests/sentry/baselines/config-refusal-text.json"
 

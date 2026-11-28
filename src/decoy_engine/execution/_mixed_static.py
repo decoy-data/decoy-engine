@@ -45,7 +45,7 @@ import pyarrow as pa
 from decoy_engine.declared_casting._eligibility import declared_route_guard
 from decoy_engine.declared_casting._refusals import note_declined
 from decoy_engine.execution import _mixed_admission as admission
-from decoy_engine.execution._column_access import column_access
+from decoy_engine.plan.column_access import column_access
 from decoy_engine.profile._readers import LazySource
 
 if TYPE_CHECKING:

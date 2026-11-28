@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 from decoy_engine import reasons
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.plan._types import ColumnSeed, GroupSeed
+from decoy_engine.plan.column_access import provider_is_composite
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._requirements import NodeRequirements
@@ -81,21 +82,6 @@ class WorkNode:
     @property
     def key(self) -> _NodeKey:
         return work_order_key(self.table, self.columns)
-
-
-def provider_is_composite(provider: str | None, registry: ProviderRegistry) -> bool:
-    """Whether a column's provider fans out to a multi-column composite node.
-
-    The single source of the provider-composite predicate: a registry-bound
-    provider whose capability ``backend_type == "composite"``. ``build_work_list``
-    uses it to set ``WorkNode.kind == "composite"``, and the native planning
-    boundary reads the same helper so ``native_route_eligibility`` and
-    ``compile_native_plan`` never disagree on whether a column is composite.
-    Null-guarded before ``registry.has``, which expects a provider string.
-    """
-    if not provider or not registry.has(provider):
-        return False
-    return registry.get_capabilities(provider).backend_type == "composite"
 
 
 def build_work_list(plan: Plan, registry: ProviderRegistry) -> list[WorkNode]:
@@ -340,7 +326,7 @@ def _masked_driver_columns(node: WorkNode) -> frozenset[str]:
     if node.kind != "scalar" or not isinstance(plan_slice, ColumnSeed):
         return frozenset()
     from decoy_engine.execution._adapter import provider_config_to_dict
-    from decoy_engine.execution._column_access import scalar_creating_reads
+    from decoy_engine.plan.column_access import scalar_creating_reads
 
     entry = {
         "name": node.columns[0] if node.columns else None,

@@ -56,10 +56,14 @@ from decoy_engine.generation.composite._provider import (
     CompositeProvider,
     composite_provider,
 )
+from decoy_engine.generation.composite._validate import (
+    _COMPOSITE_OUTPUT_COLUMNS as COMPOSITE_OUTPUT_COLUMNS,
+)
 from decoy_engine.generation.composite._validate import composite_wiring_consistent
 
 __all__ = [
     "COMPOSITE_BACKEND",
+    "COMPOSITE_OUTPUT_COLUMNS",
     "BundlePool",
     "CompositeAdapter",
     "CompositeAddress",

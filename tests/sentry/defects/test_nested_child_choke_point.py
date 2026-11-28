@@ -28,7 +28,7 @@ from tests.sentry.defects import _defect_scan as scan
 OWNER = "_nested_json/_rules.py"
 # The seven modules that read a nested child at the slice base; each must call the choke point.
 READERS = (
-    "execution/_column_access.py",
+    "plan/column_access/_declarations.py",
     "execution/_pipeline_multi_table.py",
     "execution/_strategies/nested/_handler.py",
     "plan/_checks_bucket_perturb.py",

@@ -14,6 +14,7 @@ from decoy_engine.config import classify_table_kinds
 from decoy_engine.contracts.column_shape import source_facts_of
 from decoy_engine.execution import _guards
 from decoy_engine.plan._seed import _normalize_job_seed_int
+from decoy_engine.plan.column_access import TableWrites, written_columns_by_table
 from decoy_engine.profile import DeclarationRequest
 from decoy_engine.relationships import (
     RelationshipGraph,
@@ -46,6 +47,19 @@ class RoutingFacts:
     graph: RelationshipGraph
     namespace_registry: Any
     caller_sources: dict[str, pa.Table | LazySource]
+
+    def writes(
+        self, config: Mapping[str, Any], registry: ProviderRegistry
+    ) -> dict[str, TableWrites]:
+        """Which columns the run may write, per table, over the run's own graph and registry, so
+        the post-scan's answer is the one the run executes. `build_run_context` asks once, on the
+        final facts (after any resident-fallback rebuild)."""
+        return written_columns_by_table(
+            config,
+            schemas={n: s.schema.names for n, s in self.caller_sources.items()},
+            edges=self.graph.edges,
+            registry=registry,
+        )
 
 
 def build_routing_facts(

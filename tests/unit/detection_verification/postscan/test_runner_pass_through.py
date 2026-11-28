@@ -5,12 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from decoy_engine import reasons
 from decoy_engine.execution import ExecutionError
 from decoy_engine.fileaccess import FileAccessReadError
+from decoy_engine.verification.postmask import _column_facts as column_facts_module
 from decoy_engine.verification.postmask import runner
+from decoy_engine.verification.postmask.policy_validation import check_policy_validation
 
 CANARY = "CANARY-6a0f"
 CHECKS = ["check_residual_pii", "fk_findings", "check_policy_validation"]
@@ -62,3 +65,27 @@ def test_any_other_error_becomes_an_error_finding_that_names_the_class_only(
     assert CANARY not in repr(report)
     assert CANARY not in caplog.text
     assert report["error_count"] == 1
+
+
+def test_a_coded_error_inside_the_policy_comparison_propagates_as_the_same_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raised = FileAccessReadError("sources.t.path")
+    calls: list[int] = []
+
+    def compare(*_args: Any) -> Any:
+        calls.append(1)
+        raise raised
+
+    # The policy check compares through the one authority.
+    monkeypatch.setattr(column_facts_module, "identity_facts", compare)
+    config = {
+        "version": 2,
+        "tables": [{"name": "t", "columns": [{"name": "email", "strategy": "hash"}]}],
+    }
+    source = {"t": pd.DataFrame({"email": ["a1", "a2"]})}
+    output = {"t": pd.DataFrame({"email": ["b1", "b2"]})}
+    with pytest.raises(FileAccessReadError) as info:
+        check_policy_validation(source, output, config)
+    assert calls
+    assert info.value is raised

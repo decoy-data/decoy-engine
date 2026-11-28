@@ -8,6 +8,7 @@ in the real module text, so a scanner that stops seeing it turns the cell red.
 
 from __future__ import annotations
 
+import ast
 import json
 from collections.abc import Callable
 
@@ -340,3 +341,53 @@ def test_dropping_a_cells_key_from_the_cell_module_is_flagged() -> None:
     planted = text.replace('    "mixed": (', '    "mixed_gone": (', 1)
     found = coverage.coverage_sites(sources={path: planted})
     assert found == ["route-coverage::mixed::no-gate-proof::0"]
+
+
+# ----- one writer query -----------------------------------------------------------------------
+
+# Module-path prefixes, not import targets.
+_PRIVATE_ACCESS = tuple(
+    "decoy_engine." + m for m in ("execution._column_access", "plan.column_access._")
+)
+_ACCESS_HOME = "plan/column_access/"
+
+
+def _private_access_imports(sources: dict[str, str] | None = None) -> list[str]:
+    """Import sites of the old module or a private column-access module outside its package, so
+    execution and verification can only reach the declarations through `plan.column_access`."""
+    if sources is None:
+        sources = {
+            p.relative_to(scan.SRC).as_posix(): p.read_text(encoding="utf-8")
+            for p in scan.SRC.rglob("*.py")
+        }
+    found = []
+    for rel, text in sorted(sources.items()):
+        if rel.startswith(_ACCESS_HOME):
+            continue
+        for node in ast.walk(ast.parse(text)):
+            names = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module, *(f"{node.module}.{a.name}" for a in node.names)]
+            elif isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            if any(n.startswith(_PRIVATE_ACCESS) for n in names):
+                found.append(f"{rel}:{node.lineno}")
+    return found
+
+
+def test_no_module_imports_a_private_column_access_module() -> None:
+    assert _private_access_imports() == []
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        "from decoy_engine.execution._column_access import column_access\n",
+        "from decoy_engine.plan.column_access._writes import may_write\n",
+        "from decoy_engine.plan.column_access import _declarations\n",
+    ],
+)
+def test_a_private_column_access_import_is_flagged(planted: str) -> None:
+    rel = "verification/postmask/_column_facts.py"
+    text = (scan.SRC / rel).read_text(encoding="utf-8")
+    assert _private_access_imports({rel: planted + text}) == [f"{rel}:1"]

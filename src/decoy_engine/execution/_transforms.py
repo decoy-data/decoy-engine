@@ -199,7 +199,7 @@ def reject_config_references_stored_index(
         return
     import unicodedata
 
-    from decoy_engine.execution._column_access import column_access
+    from decoy_engine.plan.column_access import column_access
 
     table_config: Mapping[str, Any] = next(
         (t for t in config.get("tables") or [] if t.get("name") == table), {}

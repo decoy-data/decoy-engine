@@ -8,7 +8,7 @@
   },
   "src/decoy_engine/execution": {
    "reason": "over the 25-module cap at 104 when LAYOUT E2 froze it; may only shrink, next module goes in execution/chunked/, execution/sequential/ or execution/isolated/",
-   "max": 102
+   "max": 101
   },
   "src/decoy_engine/execution/_strategies": {
    "reason": "over the 25-module cap at 29 when LAYOUT E2 froze it; may only shrink, next module goes in execution/_strategies/<family>/",

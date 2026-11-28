@@ -13,7 +13,11 @@ import pandas as pd
 import pytest
 
 from decoy_engine import reasons
-from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
+from decoy_engine.verification.postmask._column_facts import (
+    ColumnFacts,
+    DetectorRate,
+    standalone_writes,
+)
 from decoy_engine.verification.postmask._model_findings import review
 from decoy_engine.verification.postmask.residual_pii import (
     check_residual_pii,
@@ -26,6 +30,12 @@ def _cfg(strategy: str, column: str = "customer_id") -> dict:
         "version": 2,
         "tables": [{"name": "t", "columns": [{"name": column, "strategy": strategy}]}],
     }
+
+
+def _findings(facts, config, failed=None):
+    """`residual_pii_findings` with the writer query the frame path computes for these tables."""
+    schemas = {table: list(columns) for table, columns in facts.items()}
+    return residual_pii_findings(facts, config, failed, writes=standalone_writes(config, schemas))
 
 
 def _facts(
@@ -60,7 +70,7 @@ def _one(findings):
 
 
 def _grade(strategy: str = "redact", **kw):
-    return _one(residual_pii_findings(_facts(**kw), _cfg(strategy)))
+    return _one(_findings(_facts(**kw), _cfg(strategy)))
 
 
 def test_redacted_hint_gated_hit_is_info_when_comparison_ran():
@@ -126,7 +136,7 @@ def test_mixed_gated_and_ungated_hits_still_fail():
     detectors = (("mrn", 1.0), ("ssn", 0.9))
     facts = _facts(identical=0, comparable=100, detectors=detectors)
     assert [d.detector_id for d in facts["t"]["customer_id"].detectors] == ["mrn", "ssn"]
-    assert _one(residual_pii_findings(facts, _cfg("redact"))).severity == "fail"
+    assert _one(_findings(facts, _cfg("redact"))).severity == "fail"
 
 
 def test_no_comparison_still_fails():
@@ -145,7 +155,7 @@ def test_identity_error_is_still_an_error():
     facts = _facts(identical=0, comparable=0)
     bad = facts["t"]["customer_id"]
     facts["t"]["customer_id"] = ColumnFacts(**{**bad.__dict__, "identity_error": "ValueError"})
-    assert _one(residual_pii_findings(facts, _cfg("redact"))).severity == "error"
+    assert _one(_findings(facts, _cfg("redact"))).severity == "error"
 
 
 def test_a_source_that_cannot_be_read_gives_one_error_finding_for_the_column():
@@ -156,7 +166,7 @@ def test_a_source_that_cannot_be_read_gives_one_error_finding_for_the_column():
     facts["t"]["customer_id"] = ColumnFacts(
         **{**bad.__dict__, "identity_error": reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE}
     )
-    findings = residual_pii_findings(facts, _cfg("redact"))
+    findings = _findings(facts, _cfg("redact"))
     errors = [f for f in findings if f.severity == "error"]
     assert len(errors) == 1
     assert reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE in errors[0].message
@@ -191,7 +201,7 @@ def _dismissal(strategy: str = "redact") -> dict:
 @pytest.mark.parametrize(("identical", "comparable"), [(1, 100), (2, 100), (3, 100), (10, 100)])
 def test_a_dismissal_never_lowers_a_gated_warning(identical, comparable):
     config = {**_cfg("redact"), "post_scan": {"dismissed": [_dismissal()]}}
-    findings = residual_pii_findings(_facts(identical=identical, comparable=comparable), config)
+    findings = _findings(_facts(identical=identical, comparable=comparable), config)
     assert _one(findings).severity == "warning"
     (reviewed,), _stale = review(findings, config)
     assert reviewed.severity == "warning"
@@ -200,6 +210,6 @@ def test_a_dismissal_never_lowers_a_gated_warning(identical, comparable):
 
 def test_a_dismissal_still_lowers_nothing_on_a_gated_info():
     config = {**_cfg("redact"), "post_scan": {"dismissed": [_dismissal()]}}
-    findings = residual_pii_findings(_facts(identical=0, comparable=100), config)
+    findings = _findings(_facts(identical=0, comparable=100), config)
     (reviewed,), _stale = review(findings, config)
     assert reviewed.severity == "info"

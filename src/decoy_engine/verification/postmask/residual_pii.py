@@ -1,49 +1,43 @@
 """Residual PII check (Reframe-A).
 
-Re-runs the existing detectors over the MASKED OUTPUT to find
-columns that still match a PII pattern. Distinguishes three cases:
+Re-runs the existing detectors over the MASKED OUTPUT to find columns that still match a PII
+pattern. Distinguishes three cases:
 
-1. Detector hit on a column that was NOT configured to be masked.
-   The operator likely forgot a column. Severity: warning.
-2. Detector hit on a column that WAS configured to be masked to a
-   strategy that legitimately produces detectable values (faker name
-   on a person_name column produces person_name detector hits; this
-   is the expected outcome). Severity: info.
-3. Detector hit on a column that WAS configured to be masked to a
-   strategy that should DESTROY the pattern (hash, redact, bucketize),
-   but the pattern survived. Indicates the mask did not fire or
+1. Detector hit on a column that was NOT configured to be masked. The operator likely forgot a
+   column. Severity: warning.
+2. Detector hit on a column that WAS configured to be masked to a strategy that legitimately
+   produces detectable values (faker name on a person_name column produces person_name detector
+   hits; this is the expected outcome). Severity: info.
+3. Detector hit on a column that WAS configured to be masked to a strategy that should DESTROY the
+   pattern (hash, redact, bucketize), but the pattern survived. Indicates the mask did not fire or
    failed silently. Severity: fail.
 
-Strategies that ARE expected to produce detector hits (i.e. legitimate
-realistic-fake): faker, formula, categorical (when categories are
-realistic-looking), reference (when parent values are realistic), date_shift.
+Strategies that ARE expected to produce detector hits (i.e. legitimate realistic-fake): faker,
+formula, categorical (when categories are realistic-looking), reference (when parent values are
+realistic), date_shift.
 
-Strategies that DESTROY the detector pattern: hash, redact, bucketize,
-truncate (when truncation depth is small enough that the pattern can no
-longer match). FPE is a special case -- it preserves character class
-distribution but scrambles values, so it might or might not produce
-detector hits depending on the source's natural format.
+Strategies that DESTROY the detector pattern: hash, redact, bucketize, truncate (when truncation
+depth is small enough that the pattern can no longer match). FPE is a special case -- it preserves
+character class distribution but scrambles values, so it might or might not produce detector hits
+depending on the source's natural format.
 
-Source comparison (audit C1 fix, 2026-06-12): when ``source_frames``
-is supplied, every detector-flagged column is additionally compared
-POSITIONALLY against its source column and the base severity can be
-escalated (never lowered). The signal is ``source_identity_rate`` --
-the fraction of aligned non-null rows where output == source. Value-set
-membership is deliberately NOT a signal: shuffle re-emits 100% of
-source values by design, categorical(from_profile) resamples the source
-category set, and reference draws from the parent domain, so membership
-false-positives on exactly the strategies that are working correctly.
-The substitution-vs-value-reuse split mirrors
-``validation/post/_checks/_leakage.py`` (``_VALUE_REUSE_STRATEGIES``):
-substitution strategies escalate on majority positional identity;
-value-reuse strategies escalate only on FULL positional identity (the
-mask provably did not move anything); constant-source columns
-(nunique <= 1) never escalate because identity is meaningless there.
+Source comparison (audit C1 fix, 2026-06-12): when ``source_frames`` is supplied, every detector-
+flagged column is additionally compared POSITIONALLY against its source column and the base
+severity can be escalated (never lowered). The signal is ``source_identity_rate`` -- the fraction
+of aligned non-null rows where output == source. Value-set membership is deliberately NOT a signal:
+shuffle re-emits 100% of source values by design, categorical(from_profile) resamples the source
+category set, and reference draws from the parent domain, so membership false-positives on exactly
+the strategies that are working correctly. The substitution-vs-value-reuse split mirrors
+``validation/post/_checks/_leakage.py`` (``_VALUE_REUSE_STRATEGIES``): substitution strategies
+escalate on majority positional identity; value-reuse strategies escalate only on FULL positional
+identity (the mask provably did not move anything); constant-source columns (nunique <= 1) never
+escalate because identity is meaningless there.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -51,84 +45,50 @@ import pandas as pd
 from decoy_engine import reasons
 from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
-from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
+from decoy_engine.internal.cell_identity import IdentityFailure
+from decoy_engine.plan.column_access import TableWrites, may_write
+from decoy_engine.profiling import passes_through
+from decoy_engine.verification.postmask._column_facts import (
+    ColumnFacts,
+    DetectorRate,
+    cell_view,
+    compare_or_failure,
+    standalone_writes,
+)
 from decoy_engine.verification.postmask.types import ResidualPIIFinding, Severity
 
-# Strategies whose output is EXPECTED to look like real PII. A detector
-# hit on a column masked with one of these is informational, not a
-# warning.
+# Strategies whose output is EXPECTED to look like real PII: a hit is informational.
 _PRODUCES_PII_LIKE_VALUES: frozenset[str] = frozenset(
-    {
-        "faker",
-        "formula",
-        "categorical",
-        "reference",
-        "date_shift",
-    }
+    {"faker", "formula", "categorical", "reference", "date_shift"}
 )
 
-# Strategies that DESTROY detector patterns. A surviving hit on a column
-# masked with one of these is a fail (the mask did not work).
-# QA-4 F1 (2026-06-01): text_redact was missing from this set.
-# text_redact replaces matched PII spans with a fixed token; any
-# detector still hitting after text_redact ran is a failure of the
-# detector coverage and must surface as 'fail' (not 'warning').
-_DESTROYS_PATTERN: frozenset[str] = frozenset(
-    {
-        "hash",
-        "redact",
-        "text_redact",
-        "bucketize",
-    }
-)
+# Strategies that DESTROY detector patterns: a surviving hit is a fail (the mask did not work).
+# QA-4 F1: text_redact belongs here, as a hit after it ran is a detector-coverage failure.
+_DESTROYS_PATTERN: frozenset[str] = frozenset({"hash", "redact", "text_redact", "bucketize"})
 
-# The destroying strategies that replace a whole cell. text_redact is left out: it replaces
-# matched spans, and the name-hint-only detectors are not in its span set, so a cell can still
-# hold a name after it ran.
+# The destroying strategies that replace a whole cell. Not text_redact: it replaces matched spans,
+# and the name-hint-only detectors are not in its span set, so a cell can still hold a name.
 _WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"})
 
-# Dennis M12 fix (2026-06-01): strategies that explicitly leave the
-# column untouched. A detector hit on these is expected -- the user
-# deliberately marked the column as a passthrough -- so it's classified
-# 'info' (a confirmation), not 'warning'. Without this, every
-# passthrough column that matched any detector emitted a false-positive
-# residual-PII warning.
+# Strategies that leave the column untouched: a hit is the operator's choice, graded 'info'.
+# The cell is the source cell only when no other writer owns the column (`may_write`).
+_NO_OP_BY_DESIGN: frozenset[str] = frozenset({"passthrough"})
 _NOT_INSPECTABLE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+_DISTINCT_LIMIT = reasons.quality.HIGH_CARDINALITY_DISTINCT_LIMIT_EXCEEDED
 
-_NO_OP_BY_DESIGN: frozenset[str] = frozenset(
-    {
-        "passthrough",
-    }
-)
+# Strategies that REPLACE values per-cell: positional identity with the source at scale means the
+# mask did not fire. Mirrors the substitution side of validation/post/_checks/_leakage.py.
+_SUBSTITUTION_STRATEGIES: frozenset[str] = frozenset({"faker", "date_shift", "fpe"})
 
-# Strategies that REPLACE values per-cell: positional identity with the
-# source at scale means the mask did not fire. Mirrors the substitution
-# side of validation/post/_checks/_leakage.py.
-_SUBSTITUTION_STRATEGIES: frozenset[str] = frozenset(
-    {
-        "faker",
-        "date_shift",
-        "fpe",
-    }
-)
+# Strategies that legitimately re-emit source VALUES (in new positions / proportions): only FULL
+# positional identity is a failure signal. Mirrors _VALUE_REUSE_STRATEGIES in _leakage.py, plus
+# reference (parent domain == source FK domain by design).
+_REUSES_SOURCE_VALUES: frozenset[str] = frozenset({"shuffle", "categorical", "reference"})
 
-# Strategies that legitimately re-emit source VALUES (in new positions /
-# proportions): only FULL positional identity is a failure signal.
-# Mirrors _VALUE_REUSE_STRATEGIES in _leakage.py, plus reference (parent
-# domain == source FK domain by design).
-_REUSES_SOURCE_VALUES: frozenset[str] = frozenset(
-    {
-        "shuffle",
-        "categorical",
-        "reference",
-    }
-)
-
-# Escalation thresholds for substitution strategies and unconfigured
-# columns. Faker/FPE positional self-maps are near-impossible at scale,
-# so >=50% identity means the mask mostly did not fire; 5-50% surfaces
-# as a non-blocking warning (partial failure, operator review). The
-# min-rows floor keeps tiny frames from failing on coincidence.
+# Escalation thresholds for substitution strategies and unconfigured columns. Faker/FPE
+# positional self-maps are near-impossible at scale, so >=50% identity means the mask mostly
+# did not fire; 5-50% is a non-blocking warning. The min-rows floor keeps tiny frames from
+# failing on coincidence.
 _LEAK_FAIL_RATE = 0.5
 _LEAK_WARN_RATE = 0.05
 _LEAK_FAIL_MIN_ROWS = 3
@@ -144,32 +104,36 @@ def check_residual_pii(
 ) -> list[ResidualPIIFinding]:
     """Scan masked output for surviving PII patterns.
 
-    Args:
-        output_frames: ``{table_name: post-mask DataFrame}``.
-        config: the validated pipeline config dict (from
-            ``PipelineConfig.model_dump()``).
-        source_frames: ``{table_name: pre-mask DataFrame}``. When
-            supplied, detector-flagged columns are compared positionally
-            against source and severity escalates on output==source
-            identity (see module docstring). When ``None``, behavior
-            degrades to detector-plus-strategy classification only --
-            real leaks on PII-like-producer strategies are then
-            invisible, so callers that have the source should pass it.
-
-    Returns:
-        List of ResidualPIIFinding. Empty list if nothing matched.
-        Severity is classified based on the column's configured
-        masking strategy (or absence of one), then escalated by the
-        source comparison when evidence of a leak exists.
+    `config` is the validated pipeline config dict. With `source_frames`, each detector-flagged
+    column is compared positionally with its source and the severity escalates on identity (see
+    the module docstring); without it a leak on a PII-like producer is invisible. Severity comes
+    from the configured strategy, then the source comparison. The writer query is the one a run
+    with this config compiles (`standalone_writes`).
     """
-    facts = {
-        table_name: {
-            str(col_name): _frame_column_facts(table_name, df, str(col_name), source_frames)
-            for col_name in df.columns
-        }
-        for table_name, df in output_frames.items()
-    }
-    return residual_pii_findings(facts, config)
+    schemas = {name: [str(c) for c in df.columns] for name, df in output_frames.items()}
+    try:
+        writes = standalone_writes(config, schemas)
+    except Exception as exc:
+        if passes_through(exc):
+            raise
+        # A relationship that does not build (key lengths that differ) fails the check as the
+        # runner's does, by class name only.
+        return [residual_pii_error("", type(exc).__name__)]
+    # A table whose facts fail is reported by class name and the others are still checked, as
+    # the batch check does.
+    facts: dict[str, dict[str, ColumnFacts]] = {}
+    failed: dict[str, str] = {}
+    for table_name, df in output_frames.items():
+        try:
+            facts[table_name] = {
+                c: _frame_column_facts(table_name, df, c, source_frames)
+                for c in dict.fromkeys(str(c) for c in df.columns)
+            }
+        except Exception as exc:
+            if passes_through(exc):
+                raise
+            failed[table_name] = type(exc).__name__
+    return residual_pii_findings(facts, config, failed, writes=writes)
 
 
 def _frame_column_facts(
@@ -179,13 +143,28 @@ def _frame_column_facts(
     source_frames: dict[str, pd.DataFrame] | None,
 ) -> ColumnFacts:
     """The facts one column of a resident frame yields, so the frame check and the batch check
-    share `residual_pii_findings` as the only place a finding is built."""
-    series = df[col_name]
+    share `residual_pii_findings` as the only place a finding is built. Read by first position;
+    a column the authority refuses reaches no detector."""
+    series = df.iloc[:, [str(c) for c in df.columns].index(col_name)]
     comparable = identical = distinct = 0
-    if source_frames is not None:
-        identity = _source_identity(source_frames, table_name, col_name, series)
-        if identity is not None:
-            identical, comparable, distinct = identity
+    out_view = cell_view(series)
+    identity_error = out_view.refused
+    distinct_error: str | None = None
+    pair = _aligned_source(source_frames, table_name, col_name, series)
+    if pair is not None:
+        src_view = cell_view(pair[0])
+        refused = src_view.refused or out_view.refused
+        # Each failure is the column's own and is recorded by class name only, as the batch
+        # check does: the message of a comparison error can carry a cell value.
+        facts = IdentityFailure(refused) if refused else compare_or_failure(*pair)
+        if isinstance(facts, IdentityFailure):
+            identity_error = facts.error
+        else:
+            comparable, identical = facts.comparable, facts.identical
+        if comparable:
+            # A failed count leaves the identity counts standing, as on the batch path.
+            distinct, distinct_error = src_view.distinct, src_view.distinct_error
+    detectors = () if out_view.refused else run_all_detectors(series, col_name)
     return ColumnFacts(
         table=table_name,
         column=col_name,
@@ -196,10 +175,10 @@ def _frame_column_facts(
         bytes_identical=False,
         source_distinct=distinct,
         output_distinct=0,
-        detectors=tuple(
-            DetectorRate(m.detector_id, m.match_rate, m.confidence)
-            for m in run_all_detectors(series, col_name)
-        ),
+        detectors=tuple(DetectorRate(m.detector_id, m.match_rate, m.confidence) for m in detectors),
+        identity_error=identity_error,
+        distinct_error=distinct_error,
+        source_distinct_failed=distinct_error is not None,
     )
 
 
@@ -240,41 +219,24 @@ def dismissible(finding: ResidualPIIFinding) -> bool:
     return finding.severity == "warning" and not is_source_identity_finding(finding)
 
 
-def _source_identity(
-    source_frames: dict[str, pd.DataFrame],
+def _aligned_source(
+    source_frames: dict[str, pd.DataFrame] | None,
     table_name: str,
     col_name: str,
     out_col: pd.Series,
-) -> tuple[int, int, int] | None:
-    """Positional out==src identity over comparable rows, or None.
-
-    Returns ``(identical_count, comparable_count, source_distinct)``. None
-    when the source lacks the table/column, row counts differ (a
-    row-count mismatch is policy_validation's M13 concern, not a leak
-    signal), or the comparison itself fails. Must never raise: the
-    runner's per-check catch-all would otherwise collapse every
-    residual finding into a single error row.
-    """
-    try:
-        src_df = source_frames.get(table_name)
-        if src_df is None or col_name not in src_df.columns:
-            return None
-        src_col = src_df[col_name]
-        if len(src_col) != len(out_col):
-            return None
-        # Positional comparison regardless of index shape (QA-4 F6
-        # precedent in policy_validation).
-        src = src_col.reset_index(drop=True).astype(object)
-        out = out_col.reset_index(drop=True).astype(object)
-        both_present = src.notna() & out.notna()
-        comparable = int(both_present.sum())
-        if comparable == 0:
-            return None
-        identical = int((src[both_present] == out[both_present]).sum())
-        src_distinct = int(src.nunique(dropna=True))
-        return (identical, comparable, src_distinct)
-    except Exception:
+) -> tuple[pd.Series, pd.Series] | None:
+    """The source column and `out_col` on one positional index (QA-4 F6), or None when there is
+    no source column or the row counts differ (policy_validation's M13 concern, not a leak)."""
+    if source_frames is None:
         return None
+    src_df = source_frames.get(table_name)
+    names = [] if src_df is None else [str(c) for c in src_df.columns]
+    if src_df is None or col_name not in names:
+        return None
+    src_col = src_df.iloc[:, names.index(col_name)]
+    if len(src_col) != len(out_col):
+        return None
+    return src_col.reset_index(drop=True), out_col.reset_index(drop=True)
 
 
 # With no config entry for the table (no `--config`, or a table the config omits) the engine
@@ -305,7 +267,7 @@ def _escalate(
     verbatim-preserved ID columns on a medium-confidence guess).
     Constant-source columns never escalate.
     """
-    if src_distinct <= 1:
+    if ColumnFacts.constant(src_distinct):
         return None
 
     full_identity = identity_rate == 1.0
@@ -344,9 +306,8 @@ def _escalate(
         return None
 
     if configured == "formula":
-        # Formula may legitimately incorporate / echo source fragments;
-        # only full-column identity (an identity formula on a PII
-        # column) is certain failure.
+        # Formula may legitimately incorporate / echo source fragments; only full-column identity
+        # (an identity formula on a PII column) is certain failure.
         if full_identity:
             return (
                 "fail",
@@ -363,9 +324,8 @@ def _escalate(
             )
         return None
 
-    # Value-reuse strategies (shuffle/categorical/reference) and any
-    # other configured strategy: full positional identity means the
-    # mask provably moved nothing.
+    # Value-reuse strategies (shuffle/categorical/reference) and any other configured strategy:
+    # full positional identity means the mask provably moved nothing.
     if full_identity:
         return (
             "fail",
@@ -458,11 +418,10 @@ def _classify(
             f"strategy {configured!r} produces realistic-looking values.",
         )
     if configured in _REUSES_SOURCE_VALUES:
-        # Shuffle re-emits the source value multiset by design, so a
-        # detector hit on shuffled real values is the expected outcome
-        # (categorical/reference already classify as info via
-        # _PRODUCES_PII_LIKE_VALUES). The source-identity backstop in
-        # _escalate fails the column if the shuffle moved nothing.
+        # Shuffle re-emits the source value multiset by design, so a detector hit on shuffled real
+        # values is the expected outcome (categorical/reference already classify as info via
+        # _PRODUCES_PII_LIKE_VALUES). The source-identity backstop in _escalate fails the column if
+        # the shuffle moved nothing.
         return (
             "info",
             f"column matched {detector_id!r}; expected because the configured "
@@ -483,13 +442,37 @@ def _classify(
     )
 
 
+def _compare_raised(detector_id: str | None, error_class: str) -> str:
+    """The message of a failed source comparison: the class name only, as text can carry a value."""
+    hit = f"column matched {detector_id!r} but the" if detector_id else "the"
+    return (
+        f"{hit} source comparison raised {error_class} (see job log); a leak cannot be ruled out."
+    )
+
+
+def residual_pii_error(table: str, error_class: str) -> ResidualPIIFinding:
+    """The finding for a check that could not run on `table` ("" for every table): the error's
+    class name and fixed text only, as an error's message can carry a cell value."""
+    return ResidualPIIFinding(
+        table=table,
+        column="",
+        detector_id="",
+        match_rate=0.0,
+        severity="error",
+        message=f"residual_pii check raised {error_class} (see job log for details)",
+    )
+
+
 def residual_pii_findings(
     output_facts: Mapping[str, Mapping[str, ColumnFacts]],
     config: Mapping[str, Any],
     failed_tables: Mapping[str, str] | None = None,
+    *,
+    writes: Mapping[str, TableWrites],
 ) -> list[ResidualPIIFinding]:
     """`check_residual_pii` from column facts: `{table: {column: ColumnFacts}}` over the output,
-    in column order. The decision tables are the ones the frame check uses."""
+    in column order. `writes` is the run's writer query (`written_columns_by_table`): only a
+    table it proves leaves a column unwritten lets a passthrough skip the source comparison."""
     strategy_by_col = {key: entry["strategy"] for key, entry in configured_columns(config).items()}
     # Table presence comes from the config's table list, not from the (table, column) strategy
     # lookup, so "table absent" and "table present, column absent" stay distinct.
@@ -498,22 +481,18 @@ def residual_pii_findings(
         for t in config.get("tables") or []
         if isinstance(t, Mapping) and isinstance(t.get("name"), str)
     }
-    findings: list[ResidualPIIFinding] = [
-        ResidualPIIFinding(
-            table=table,
-            column="",
-            detector_id="",
-            match_rate=0.0,
-            severity="error",
-            message=f"residual_pii check raised {error} (see job log for details)",
-        )
-        for table, error in (failed_tables or {}).items()
-    ]
+    findings = [residual_pii_error(t, cls) for t, cls in (failed_tables or {}).items()]
     for table_name, columns in output_facts.items():
         for col_name, fact in columns.items():
-            if _NOT_INSPECTABLE in (fact.identity_error, fact.distinct_error):
-                # Fail closed whatever the strategy: a column the check could not read is not a
-                # clean one. The text names the code only.
+            configured = strategy_by_col.get((table_name, col_name))
+            written = may_write(writes, table_name, col_name)
+            # A passthrough leaves its cell alone only when nothing else writes the column.
+            exempt = configured in _NO_OP_BY_DESIGN and not written
+            # A column the check could not read or count is never clean: one error row, its code.
+            failed = (fact.identity_error, fact.distinct_error)
+            code = next((c for c in (_NOT_INSPECTABLE, _DISTINCT_LIMIT) if c in failed), None)
+            unread = code == _NOT_INSPECTABLE
+            if code:
                 findings.append(
                     ResidualPIIFinding(
                         table=table_name,
@@ -521,64 +500,37 @@ def residual_pii_findings(
                         detector_id="",
                         match_rate=0.0,
                         severity="error",
-                        message=f"column could not be inspected ({_NOT_INSPECTABLE}); "
-                        "a leak cannot be ruled out.",
+                        message=f"column could not be checked ({code}); a leak cannot be ruled out.",
                     )
                 )
             if not fact.detectors:
+                # A failed comparison on a column the run may write is reported with no hit too.
+                if fact.identity_error is not None and written and not unread:
+                    findings.append(
+                        ResidualPIIFinding(
+                            table=table_name,
+                            column=col_name,
+                            detector_id="",
+                            match_rate=0.0,
+                            severity="error",
+                            configured_strategy=configured,
+                            message=_compare_raised(None, str(fact.identity_error)),
+                        )
+                    )
                 continue
             top = fact.detectors[0]
-            configured = strategy_by_col.get((table_name, col_name))
-            table_present = table_name in config_tables
-            severity, message = _classify(top.detector_id, configured, table_present)
             # Identity needs comparable rows; none means no source column or a row-count mismatch.
-            compared = fact.comparable_rows > 0 and configured not in _NO_OP_BY_DESIGN
+            compared = fact.comparable_rows > 0 and not exempt
             rate = fact.identical_rows / fact.comparable_rows if compared else None
-            if (
-                rate is not None
-                and configured in _WHOLE_CELL_DESTROYS
-                and all(d.detector_id in NAME_HINT_GATED_DETECTORS for d in fact.detectors)
-            ):
-                # Every hit is a loose regex held back by a column-name hint, so the source
-                # comparison, not the hit, says whether the mask fired.
-                severity, message = _grade_gated(
-                    identical_rows=fact.identical_rows,
-                    comparable_rows=fact.comparable_rows,
-                    detector_id=top.detector_id,
-                    strategy=str(configured),
-                )
-            elif rate is not None:
-                override = _escalate(
-                    configured=configured,
-                    identity_rate=rate,
-                    identical_count=fact.identical_rows,
-                    # An uncounted source distinct is unknown, not constant: keep it above the
-                    # constant-source cutoff so the valid identity rate still decides. A failed
-                    # output count says nothing about the source.
-                    src_distinct=max(fact.source_distinct, 2)
-                    if fact.source_distinct_failed
-                    else fact.source_distinct,
-                    detector_confidence=top.confidence,
-                    detector_id=top.detector_id,
-                    table_present=table_present,
-                )
-                if override is not None and (
-                    _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
-                ):
-                    severity, message = override
-            elif (
-                fact.identity_error
-                and fact.identity_error != _NOT_INSPECTABLE
-                and configured not in _NO_OP_BY_DESIGN
-            ):
-                # The source comparison could not run, so the escalation this column may need is
+            grade = _Grade(fact, configured, table_name in config_tables, rate)
+            if rate is not None and fact.source_distinct_failed:
+                severity, message = grade.unknown_diversity()
+            elif rate is None and fact.identity_error is not None and not exempt and not unread:
+                # The comparison could not run, so the escalation this column may need is
                 # unknown. Say so at error severity rather than report a clean "not compared".
-                # A column the check could not read already has its error finding above.
-                severity = "error"
-                message = (
-                    f"column matched {top.detector_id!r} but the source comparison raised "
-                    f"{fact.identity_error} (see job log); a leak cannot be ruled out."
-                )
+                severity, message = "error", _compare_raised(top.detector_id, fact.identity_error)
+            else:
+                severity, message = grade.known(fact.source_distinct)
             findings.append(
                 ResidualPIIFinding(
                     table=table_name,
@@ -594,3 +546,55 @@ def residual_pii_findings(
                 )
             )
     return findings
+
+
+@dataclass(frozen=True)
+class _Grade:
+    """One detector-flagged column's grade, from the hit, the strategy and the source comparison."""
+
+    fact: ColumnFacts
+    configured: str | None
+    table_present: bool
+    rate: float | None
+
+    def known(self, src_distinct: int) -> tuple[Severity, str]:
+        """The final grade for a known source distinct count: the base class, the gated path,
+        then an escalation that may only raise the severity."""
+        fact, top = self.fact, self.fact.detectors[0]
+        base = _classify(top.detector_id, self.configured, self.table_present)
+        if self.rate is None:
+            return base
+        if self.configured in _WHOLE_CELL_DESTROYS and all(
+            d.detector_id in NAME_HINT_GATED_DETECTORS for d in fact.detectors
+        ):
+            # Every hit is a loose regex held back by a column-name hint, so the source
+            # comparison, not the hit, says whether the mask fired.
+            return _grade_gated(
+                identical_rows=fact.identical_rows,
+                comparable_rows=fact.comparable_rows,
+                detector_id=top.detector_id,
+                strategy=str(self.configured),
+            )
+        override = _escalate(
+            configured=self.configured,
+            identity_rate=self.rate,
+            identical_count=fact.identical_rows,
+            src_distinct=src_distinct,
+            detector_confidence=top.confidence,
+            detector_id=top.detector_id,
+            table_present=self.table_present,
+        )
+        if override is not None and _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[base[0]]:
+            return override
+        return base
+
+    def unknown_diversity(self) -> tuple[Severity, str]:
+        """An uncounted source is neither constant nor varied: grade it as both. When the final
+        severities agree that severity stands with the base message; when they differ the check
+        could not decide. A failed output count says nothing about the source."""
+        top, constant, varied = self.fact.detectors[0], self.known(1), self.known(2)
+        if constant == varied:
+            return constant
+        if constant[0] == varied[0]:
+            return constant[0], _classify(top.detector_id, self.configured, self.table_present)[1]
+        return "error", _compare_raised(top.detector_id, str(self.fact.distinct_error))

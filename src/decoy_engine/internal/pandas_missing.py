@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import sys
+from decimal import Decimal
 from typing import Any
+
+
+def _is_masked(value: Any) -> bool:
+    """True for NumPy's masked constant, by identity. Read only when `numpy.ma` is loaded: no
+    cell can be the constant before that, and the masking hot path pays one dict lookup."""
+    ma = sys.modules.get("numpy.ma")
+    return ma is not None and value is ma.masked
 
 
 def is_null_cell(value: Any) -> bool:
@@ -19,7 +28,10 @@ def is_null_cell(value: Any) -> bool:
     compares unequal to itself too; pd.NA is caught by the pandas fallback below.
     A non-comparable object simply is not missing.
     """
-    if value is None:
+    if value is None or _is_masked(value):
+        return True
+    if isinstance(value, Decimal) and value.is_nan():
+        # A signaling NaN raises InvalidOperation on `!=`; both NaN kinds are missing.
         return True
     try:
         unequal = value != value

@@ -7,18 +7,31 @@ bounded batches and never needs the whole table.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.internal.cell_identity import IdentityFacts, IdentityFailure
 from decoy_engine.profiling import KEY_BATCH_ROWS, KeyBatches
 
 if TYPE_CHECKING:
     # Imported for typing only: decoy_engine.profile imports the profiling package.
     from decoy_engine.profile import LazySource
+
+
+@dataclass(frozen=True)
+class CellView:
+    """What a frame column's own cells say, read before any Arrow conversion: their distinct
+    count (or the count's failure class), and whether the comparison authority refused them. A
+    refused column is held in the table as a length-matched null placeholder."""
+
+    distinct: int
+    distinct_error: str | None
+    # The class name of the failure that refused the cells, or None.
+    refused: str | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +50,11 @@ class TableBatches:
     # True when a read may return fewer rows than `num_rows` declares: a declared cast drops
     # quarantined rows, and the footer count is the count before the drop.
     drops_rows: bool = False
+    # Per column of a resident frame, read from its original cells; empty on every other table.
+    cell_views: Mapping[str, CellView] = field(default_factory=dict)
+    # The identity of each paired column of a resident frame, computed on the original cells
+    # before conversion; None on every other table, whose batches are compared instead.
+    identity: Mapping[str, IdentityFacts | IdentityFailure] | None = None
 
 
 def _require_columns(columns: Sequence[str]) -> None:

@@ -145,6 +145,12 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
     *(("decoy_engine.fileaccess._types", n, r) for n, r in FILE_ACCESS_FIXED.items()),
     ("decoy_engine.profiling.scan_set", "ScanSourceError", reasons.runtime.SCAN_SOURCE_FAILED),
     ("decoy_engine.profiling.scan_set_read", "ScanSetReadError", reasons.config.UNTAGGED),
+    ("decoy_engine.internal.cell_text", "UnreadableCellError", reasons.runtime.CELL_UNREADABLE),
+    (
+        "decoy_engine.internal.cell_identity",
+        "DistinctBudgetError",
+        reasons.quality.HIGH_CARDINALITY_DISTINCT_LIMIT_EXCEEDED,
+    ),
     # F22 errno-only file-access errors: one meaning each, whoever raised them.
     (
         "decoy_engine.fileaccess._types",
@@ -160,6 +166,11 @@ _FIXED: tuple[tuple[str, str, ReasonCode], ...] = (
         "decoy_engine.verification.postmask._route_guard",
         "PostScanRouteError",
         reasons.route.POST_SCAN_MODELS_UNSUPPORTED,
+    ),
+    (
+        "decoy_engine.internal.cell_atoms",
+        "CellNotComparableError",
+        reasons.post_scan.CHECK_ERROR,
     ),
 )
 

@@ -5,7 +5,8 @@ adapter sees a null placeholder and the output takes the source column back. Tha
 correct when no handler reads the column and none writes it, because
 `CarryPlan.reattach` would overwrite a handler's output with the source value. The read
 set is therefore the union of what every dispatch surface declares here, never a scan of
-config strings.
+config strings. The post-scan reads the same declarations (`written_columns_by_table`) to
+decide which columns a run may have written.
 
 One declaration per surface, registered in `SURFACE_DECLARATIONS`:
 
@@ -17,9 +18,9 @@ One declaration per surface, registered in `SURFACE_DECLARATIONS`:
 
 `tests/native/test_column_access_surfaces.py` pins the inventory against the handler
 tables, the dispatcher's AST and a run of the stock adapter, so a new surface without a
-declaration is a test failure. This module imports only config-level helpers (the derived
-expression parser, the composite generators' output columns), never the adapter or a
-handler.
+declaration is a test failure. This module sits in `plan` so execution and verification both
+import it downward. It imports only config-level helpers (the expression parsers, the
+composite generators' output columns), never execution, the adapter or a handler.
 """
 
 from __future__ import annotations
@@ -32,17 +33,15 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from decoy_engine._nested_json import nested_children
+from decoy_engine.contracts.strategy_requirements import SIBLING_REFERENCE_KEYS
 from decoy_engine.errors import ValidationError
-from decoy_engine.expressions._when_parser import parse_when, when_column_refs
+from decoy_engine.expressions import parse_when, when_column_refs
+from decoy_engine.plan.column_access._transform_ops import transform_op_writes
 
 # Whether an entry reads its own column from the source or produces it. A created column is
 # exempt from "declared but missing from the source" only through `created_targets`.
 OWN_TARGET_SOURCE = "source"
 OWN_TARGET_CREATES = "creates"
-
-# provider_config keys that name a sibling column for any strategy. Shared with
-# `native/_requirements._required_input_columns` so the two cannot drift.
-SIBLING_REFERENCE_KEYS: tuple[str, ...] = ("group_by", "order_by", "anchor", "reference_column")
 
 
 @dataclass(frozen=True)
@@ -231,19 +230,25 @@ def _creates(declare: Declaration) -> Declaration:
 
 
 def _transforms(table_entry: Mapping[str, Any]) -> ColumnAccess:
-    """The table's `derive` ops in order: each target is written, and an expression reads the
-    source columns it names, or an earlier target (which is not a source read)."""
+    """The table's ops in order, classified by `transform_op_writes`: each `derive` target is
+    written, and an expression reads the source columns it names, or an earlier target (which is
+    not a source read)."""
     reads: set[str] = set()
     writes: set[str] = set()
     for op in table_entry.get("transforms") or []:
-        if not isinstance(op, Mapping) or op.get("op") != "derive":
+        written = transform_op_writes(op)
+        if written is None:
+            # A malformed or unknown op may read and write any column.
+            return ColumnAccess(
+                reads_unknown=True, writes_unknown=True, own_target=OWN_TARGET_CREATES
+            )
+        if not written:
             continue
         names = predicate_names(str(op.get("expression")))
         if names is None:
             return replace(_READS_UNKNOWN, own_target=OWN_TARGET_CREATES)
         reads |= names - writes
-        if isinstance(op.get("column"), str):
-            writes.add(op["column"])
+        writes |= written
     if not writes:
         return _NOTHING
     return ColumnAccess(
@@ -281,9 +286,9 @@ def _fixed_outputs(provider: str) -> Callable[[Mapping[str, Any]], frozenset[str
     def outputs(_entry: Mapping[str, Any]) -> frozenset[str] | None:
         # The same source the compile-time wiring check uses, so the canonical columns
         # cannot drift from what the handler writes.
-        from decoy_engine.generation.composite._validate import _COMPOSITE_OUTPUT_COLUMNS
+        from decoy_engine.generation.composite import COMPOSITE_OUTPUT_COLUMNS
 
-        return frozenset(_COMPOSITE_OUTPUT_COLUMNS[provider])
+        return frozenset(COMPOSITE_OUTPUT_COLUMNS[provider])
 
     return outputs
 
@@ -361,13 +366,22 @@ SURFACE_DECLARATIONS: dict[str, Declaration] = {
 }
 
 
-def _is_composite(provider: Any, registry: Any) -> bool:
-    """Whether `build_work_list` makes this entry a composite node under `registry`."""
-    if not isinstance(provider, str) or not provider:
-        return False
-    from decoy_engine.execution._runner import provider_is_composite
+def provider_is_composite(provider: Any, registry: Any) -> bool:
+    """Whether a column's provider fans out to a multi-column composite node.
 
-    return provider_is_composite(provider, registry)
+    The single source of the provider-composite predicate: a registry-bound provider whose
+    capability `backend_type == "composite"`. `build_work_list` sets `WorkNode.kind` from it,
+    the native planning boundary reads it, and so does every declaration here, so none of them
+    can disagree on whether a column is composite.
+    """
+    if not isinstance(provider, str) or not provider or not registry.has(provider):
+        return False
+    return bool(registry.get_capabilities(provider).backend_type == "composite")
+
+
+# The passthrough handler returns its frame unchanged, so an output cell is the input cell. The
+# handler's `output_is_input` and the writer query both read this one fact.
+PASSTHROUGH_OUTPUT_IS_INPUT = True
 
 
 def column_access(entry: Mapping[str, Any], registry: Any) -> ColumnAccess:
@@ -377,7 +391,7 @@ def column_access(entry: Mapping[str, Any], registry: Any) -> ColumnAccess:
     composite node, so a caller registry that rebinds or adds a composite is honored.
     """
     provider = entry.get("provider")
-    if _is_composite(provider, registry):
+    if provider_is_composite(provider, registry):
         declare = SURFACE_DECLARATIONS.get(f"composite:{provider}")
         access = _WRITES_UNKNOWN if declare is None else declare(entry)
         # The when gate is not applied to composite nodes, but the declaration stays
@@ -540,5 +554,5 @@ def composite_provider_offenders(
     return [
         (str(c.get("name", "?")), f"composite provider {c['provider']}")
         for c in columns
-        if isinstance(c, Mapping) and _is_composite(c.get("provider"), registry)
+        if isinstance(c, Mapping) and provider_is_composite(c.get("provider"), registry)
     ]

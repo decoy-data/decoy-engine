@@ -28,7 +28,12 @@ from typing import Any
 
 import pandas as pd
 
-from decoy_engine.verification.postmask._column_facts import ColumnFacts
+from decoy_engine.internal.cell_identity import IdentityFailure
+from decoy_engine.verification.postmask._column_facts import (
+    ColumnFacts,
+    cells_distinct_or_error,
+    compare_or_failure,
+)
 from decoy_engine.verification.postmask._stream_input import TableBatches
 from decoy_engine.verification.postmask.types import PolicyValidationFinding
 
@@ -88,55 +93,40 @@ def _check_one_column(
     out_df: pd.DataFrame,
 ) -> PolicyValidationFinding:
     """Compare source vs output for one column."""
-    if column not in src_df.columns or column not in out_df.columns:
-        return _missing_column(
-            table, column, strategy, column in src_df.columns, column in out_df.columns
-        )
+    in_source = column in [str(c) for c in src_df.columns]
+    in_output = column in [str(c) for c in out_df.columns]
+    if not (in_source and in_output):
+        return _missing_column(table, column, strategy, in_source, in_output)
 
-    # QA-4 F6 (2026-06-01): reset_index on the source + output frames
-    # before pulling the column. The src_col.astype(object).equals(...)
-    # comparison below is index-aware; if the caller hands in frames
-    # whose indexes differ (e.g. one was filtered by `.loc[mask]` while
-    # the other is fresh) the equals() returns False even when the
-    # row values match. Pre-fix the docstring said "frame index is
-    # assumed aligned" but no caller enforced it.
-    src_col = src_df[column].reset_index(drop=True)
-    out_col = out_df[column].reset_index(drop=True)
-    src_distinct = int(src_col.nunique(dropna=True))
-    out_distinct = int(out_col.nunique(dropna=True))
+    # By first position, compared positionally (QA-4 F6: the frames' indexes need not agree).
+    src_col = _first(src_df, column)
+    out_col = _first(out_df, column)
+    src_distinct, src_error = cells_distinct_or_error(src_col)
+    out_distinct, out_error = cells_distinct_or_error(out_col)
 
     # Dennis M13 fix (2026-06-01): row-count mismatch is its own
     # finding -- the comparison below assumes aligned indexes, and a
     # row that was dropped during masking becomes invisible to the
-    # bytes-identical check. Without this guard a strategy that
-    # legitimately dropped rows could surface as "output differs from
-    # source as expected" alongside FAIL findings for byte-identical
-    # columns, hiding the drop entirely.
+    # bytes-identical check.
     if len(src_col) != len(out_col):
         return _row_count_mismatch(
             table, column, strategy, len(src_col), len(out_col), src_distinct, out_distinct
         )
 
-    # Equality check has to be careful about ordering + dtype. We compare
-    # element-wise after coercing both to object so dtype changes don't
-    # mask actual value preservation. Frame index is enforced aligned
-    # by the reset_index above (QA-4 F6, 2026-06-01).
-    # Dennis M11 fix (2026-06-01): a comparison failure (ArrowDtype
-    # mismatch, etc) previously fell through to bytes_identical=False
-    # + severity='info' "output differs as expected", which is a false
-    # clean bill of health for a check that couldn't actually run.
-    # Surface the failure as severity='error' so the operator knows
-    # the validation didn't conclude.
-    try:
-        bytes_identical = bool(
-            len(src_col) == len(out_col) and src_col.astype(object).equals(out_col.astype(object))
-        )
-    except Exception as exc:
-        return _compare_failed(
-            table, column, strategy, type(exc).__name__, src_distinct, out_distinct
-        )
+    # Dennis M11 fix (2026-06-01): a comparison or count that fails is an `error` finding, never
+    # a clean "output differs as expected". The class name only: its text can carry a cell.
+    identity = compare_or_failure(src_col, out_col)
+    if isinstance(identity, IdentityFailure):
+        error: str | None = identity.error
+    else:
+        error = src_error or out_error
+    if error is not None or isinstance(identity, IdentityFailure):
+        return _compare_failed(table, column, strategy, str(error), src_distinct, out_distinct)
+    return _decide(table, column, strategy, src_distinct, out_distinct, identity.all_same)
 
-    return _decide(table, column, strategy, src_distinct, out_distinct, bytes_identical)
+
+def _first(frame: pd.DataFrame, column: str) -> pd.Series:
+    return frame.iloc[:, [str(c) for c in frame.columns].index(column)]
 
 
 def _missing_column(
@@ -236,7 +226,8 @@ def _decide(
     # Constant-source case: if every non-null value is the same, some
     # strategies (e.g. a deterministic mask of constant input) will
     # produce constant output, and bytes_identical can be a coincidence.
-    if src_distinct <= 1:
+    # Both counts: one source value exported in two forms is still unchanged.
+    if ColumnFacts.constant(src_distinct) and ColumnFacts.constant(out_distinct):
         return PolicyValidationFinding(
             table=table,
             column=column,

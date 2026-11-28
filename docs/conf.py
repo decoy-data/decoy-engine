@@ -216,6 +216,10 @@ nitpick_ignore = [
     ("py:class", "decoy_engine.reasons.Phase"),
     ("py:class", "decoy_engine.reasons.ReasonCode"),
     ("py:class", "decoy_engine.profiling.model_pack.DetectorSet"),
+    # The post-scan runner and residual_pii take the writer query's answer, `TableWrites`, a
+    # union alias defined in the private `plan.column_access._writes` and re-exported by
+    # `decoy_engine.plan.column_access`. Same CI-E1 class as the entries above.
+    ("py:class", "decoy_engine.plan.column_access.TableWrites"),
     # F31 AE5: `ProvenanceError`, `PlatformTriple` and `Provenance` moved to the private
     # `quality.dp_record._record` and are re-exported by `quality.dp_record` and
     # `quality.dp_provenance`. Same class as the entries above.

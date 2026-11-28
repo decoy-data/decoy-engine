@@ -22,12 +22,12 @@ from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import _chunked
 from decoy_engine.execution._chunked import check_chunked_compatibility
 from decoy_engine.execution._chunked_carry import passthrough_columns, plan_carry
-from decoy_engine.execution._column_access import column_access, handler_written_columns
 from decoy_engine.execution._transforms import TransformError
 from decoy_engine.execution.native._chunked_schema_rule import build_schema_rule
 from decoy_engine.execution.native._dispatch import run_native_or_oracle_chunked
 from decoy_engine.generation.composite import CompositeAdapter, composite_capability
 from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan.column_access import column_access, handler_written_columns
 from decoy_engine.providers_v2 import get_default_registry
 from tests._declared_schema import chunked_entry_kwargs, declared_schema
 from tests.native._b8_support import (
@@ -426,7 +426,7 @@ def test_only_a_positive_reference_refuses_a_stored_index_field() -> None:
 
 
 def test_a_composite_entry_keeps_its_own_name_in_the_touched_set() -> None:
-    from decoy_engine.execution._column_access import touched_columns
+    from decoy_engine.plan.column_access import touched_columns
 
     lone = _entry("first_name", "composite_name_email", "redact")
     assert touched_columns([lone], REG) == {"first_name", "last_name", "email"}
@@ -737,7 +737,7 @@ def test_a_when_naming_an_unnamed_stored_index_is_rejected_at_compile() -> None:
 
 def test_registry_is_a_required_keyword() -> None:
     from decoy_engine.execution import _pipeline_auto_chunk
-    from decoy_engine.execution._column_access import composite_provider_offenders
+    from decoy_engine.plan.column_access import composite_provider_offenders
 
     config = {"tables": [{"name": TABLE, "columns": [redact("s")]}]}
     with pytest.raises(TypeError):
@@ -761,8 +761,7 @@ def test_registry_is_a_required_keyword() -> None:
 
 
 def test_no_internal_module_feeds_the_registry_from_the_default() -> None:
-    """Only the public entry points and the existing registry-owning modules resolve the
-    default registry; the declaration and admission helpers never do."""
+    """Only entry points and registry-owning modules resolve the default registry."""
     import pathlib
     import re
 
@@ -773,7 +772,6 @@ def test_no_internal_module_feeds_the_registry_from_the_default() -> None:
         if "physical" not in path.parts and re.search(r"get_default_registry\(\)", path.read_text())
     }
     helpers = {
-        "_column_access.py",
         "_chunked.py",
         "_chunked_carry.py",
         "native/_chunked_schema_rule.py",
@@ -783,6 +781,8 @@ def test_no_internal_module_feeds_the_registry_from_the_default() -> None:
         "_transforms.py",
     }
     assert not (offenders & helpers), sorted(offenders & helpers)
+    plan = pathlib.Path(column_access.__code__.co_filename).parent  # the declarations' package
+    assert not {p.name for p in plan.rglob("*.py") if "get_default_registry()" in p.read_text()}
 
 
 # ---------------------------------------------------------------------------

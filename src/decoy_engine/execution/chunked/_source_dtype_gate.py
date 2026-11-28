@@ -16,11 +16,11 @@ import pyarrow as pa
 import pyarrow.types as pat
 
 from decoy_engine.execution._chunked_carry import read_set
-from decoy_engine.execution._column_access import has_when
 from decoy_engine.execution._strategies._redact import redact_with_is_string
 from decoy_engine.execution.native._faker_deterministic_admission import (
     is_effective_deterministic_faker,
 )
+from decoy_engine.plan.column_access import has_when
 
 if TYPE_CHECKING:
     from decoy_engine.execution._chunked_input import SourceFacts

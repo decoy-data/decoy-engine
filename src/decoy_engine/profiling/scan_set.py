@@ -50,6 +50,8 @@ from decoy_engine.fileaccess import (
     FileAccessUnavailable,
     entry_point,
 )
+from decoy_engine.internal.cell_atoms import CellNotComparableError
+from decoy_engine.internal.cell_text import UnreadableCellError
 from decoy_engine.profiling import _scan_integrity
 from decoy_engine.profiling._basis import claim_keys, read_basis
 from decoy_engine.profiling._model_pass import (
@@ -308,7 +310,14 @@ def _scan_one(
 def passes_through(exc: BaseException) -> bool:
     """True when `exc` must reach the caller unchanged: the file-access and validation errors, a
     scan error, or any engine error family the reason adapter classifies. Only an unclassified
-    failure is stripped to its class name."""
+    failure is stripped to its class name.
+
+    A cell that cannot be read as text is the exception: it is a fact about the data, so the scan
+    or check that met it fails with its fixed class name and the other tables and checks still
+    run. Its registered code (`runtime/cell_unreadable`) names it wherever it does escape. A cell
+    the comparison authority refuses (a record, a cycle) is the same kind of fact (`check_error`)."""
+    if isinstance(exc, (UnreadableCellError, CellNotComparableError)):
+        return False
     return isinstance(exc, (*_PASS_THROUGH, ScanSourceError, *reason_adapter.loaded_families()))
 
 

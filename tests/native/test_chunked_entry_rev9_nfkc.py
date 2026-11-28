@@ -38,7 +38,7 @@ _QUOTED = ("fullwidth_backtick", "ligature_backtick")
 def test_generic_expression_scanner_nfkc_normalizes_name(case: str) -> None:
     """Control: `predicate_names` still reads the pandas-resolved name. It serves derived and
     transform expressions, a separate language from `when:` (plan A1.1)."""
-    from decoy_engine.execution._column_access import predicate_names
+    from decoy_engine.plan.column_access import predicate_names
 
     expr, name = _CASES[case]
     assert name in (predicate_names(expr) or set())

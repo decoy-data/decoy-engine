@@ -208,6 +208,19 @@ def test_removing_one_ignore_line_is_red(scratch: Path, tmp_path: Path) -> None:
     assert not lint_scratch(tree)
 
 
+def test_the_cell_text_reader_importing_the_identity_authority_is_red(
+    scratch: Path, tmp_path: Path
+) -> None:
+    tree = _tree(scratch, tmp_path)
+    reader = tree / "src" / "decoy_engine" / "internal" / "cell_text.py"
+    _edit(
+        reader,
+        "from __future__ import annotations\n",
+        "from __future__ import annotations\n\nimport decoy_engine.internal.cell_identity  # noqa: F401\n",
+    )
+    assert not lint_scratch(tree)
+
+
 def test_a_tier_six_module_importing_execution_is_red(scratch: Path, tmp_path: Path) -> None:
     tree = _tree(scratch, tmp_path)
     leaf = tree / "src" / "decoy_engine" / "_opaque.py"

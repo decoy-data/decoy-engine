@@ -19,8 +19,7 @@ hook catches that + writes a JobPostScanIntegrityReport with
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
-from decimal import Decimal
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,14 +28,22 @@ import pyarrow as pa
 
 from decoy_engine import fileaccess
 from decoy_engine.detection.types import DetectorRun
+from decoy_engine.internal.cell_identity import IdentityFacts, IdentityFailure
+from decoy_engine.internal.cell_text import detector_text, numpy_bytes_as_objects
 from decoy_engine.internal.memory_limit import parse_megabytes
-from decoy_engine.internal.pandas_missing import is_null_cell
+from decoy_engine.plan.column_access import TableWrites
 from decoy_engine.profiling import MEMORY_LIMIT, passes_through
 from decoy_engine.verification.postmask import _model_findings
 from decoy_engine.verification.postmask._blocked import severity_counts
-from decoy_engine.verification.postmask._column_facts import ColumnFacts, column_facts
+from decoy_engine.verification.postmask._column_facts import (
+    ColumnFacts,
+    cell_view,
+    column_facts,
+    compare_or_failure,
+    standalone_writes,
+)
 from decoy_engine.verification.postmask._keys import KeyResult
-from decoy_engine.verification.postmask._stream_input import TableBatches, from_table
+from decoy_engine.verification.postmask._stream_input import CellView, TableBatches, from_table
 from decoy_engine.verification.postmask.distribution import (
     DistributionInput,
     check_distribution,
@@ -49,6 +56,7 @@ from decoy_engine.verification.postmask.fk_preservation import fk_findings
 from decoy_engine.verification.postmask.policy_validation import (
     policy_findings as check_policy_validation,
 )
+from decoy_engine.verification.postmask.residual_pii import residual_pii_error
 from decoy_engine.verification.postmask.residual_pii import (
     residual_pii_findings as check_residual_pii,
 )
@@ -72,6 +80,7 @@ def run_post_mask(
     detectors: DetectorSet | None = None,
     keys: Sequence[KeyResult] | None = None,
     distribution: DistributionInput | None = None,
+    writes: Mapping[str, TableWrites] | None = None,
 ) -> dict[str, Any]:
     """Run all three post-mask check categories + assemble the report.
 
@@ -95,6 +104,8 @@ def run_post_mask(
             FK findings derive from these. None counts them here from the two frame dicts.
         distribution: what the `post_scan.distribution` check reads; `None` runs no check and the
             report has no `distribution` section.
+        writes: the run's writer query (`written_columns_by_table`). None computes it from the
+            config, the output field names and the default registry (`standalone_writes`).
 
     Returns:
         A post-scan-integrity/v3 report dict. JSON-serializable (every
@@ -126,6 +137,7 @@ def run_post_mask(
             tables_checked=tuple(str(name) for name in output_frames),
             models=(output_frames, detectors) if detectors is not None else None,
             distribution=distribution,
+            writes=writes,
         )
 
 
@@ -138,6 +150,7 @@ def run_post_mask_tables(
     scratch: Path,
     memory_limit: str,
     distribution: DistributionInput | None = None,
+    writes: Mapping[str, TableWrites] | None = None,
 ) -> dict[str, Any]:
     """`run_post_mask` over tables the run holds as batches. The caller counted the declared keys
     (`check_keys`) and owns `scratch`; the column suite reads the tables in bounded batches. Regex
@@ -152,6 +165,7 @@ def run_post_mask_tables(
         memory_limit=memory_limit,
         tables_checked=tuple(str(name) for name in output_tables),
         distribution=distribution,
+        writes=writes,
     )
 
 
@@ -166,72 +180,80 @@ def _megabytes(limit: str) -> int:
 
 def _native(series: pd.Series) -> pa.Array | None:
     try:
-        return pa.array(series, from_pandas=True)
-    except Exception as exc:
+        return pa.array(numpy_bytes_as_objects(series), from_pandas=True)
+    # Only Arrow refusing the column selects the detector text; any other error fails the table.
+    except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         if passes_through(exc):
             raise
         return None
 
 
-def _text(series: pd.Series) -> pa.Array:
-    return pa.array(
-        [None if is_null_cell(v) else _key(v) for v in series.tolist()], type=pa.string()
-    )
+def _column_names(frame: pd.DataFrame) -> list[str]:
+    return [str(c) for c in frame.columns]
 
 
-def _key(value: object) -> str:
-    """Text that is equal for equal numbers whatever their type, as pandas `==` treats them: a
-    float 10001.0 and an int 10001 must not read as two values, or a leaked source value looks
-    changed."""
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, int):
-        return str(int(value))
-    if isinstance(value, float):
-        return str(int(value)) if value.is_integer() else repr(value)
-    if isinstance(value, Decimal):
-        if not value.is_finite():
-            return str(value)
-        if value == value.to_integral_value():
-            return str(int(value))
-        return format(value.normalize(), "f")
-    return str(value)
+def _first_columns(frame: pd.DataFrame) -> dict[str, pd.Series]:
+    """Each column name's first column, in frame order: a repeated name is matched by its first."""
+    columns: dict[str, pd.Series] = {}
+    for n, name in enumerate(_column_names(frame)):
+        if name not in columns:
+            columns[name] = frame.iloc[:, n]
+    return columns
 
 
-def _frame_table(name: str, frame: pd.DataFrame, other: pd.DataFrame | None) -> TableBatches:
-    """`frame` as Arrow, column by column. A column Arrow will not take (mixed int and str,
-    Decimal with float, a set) is carried as the text of each value, which is all the detectors
-    read. The choice is made for the column on both sides at once: if either side needs the text,
-    both get it, so a source int and an output "1" still compare equal as they do in pandas."""
-    names = [str(c) for c in frame.columns]
-    other_at = (
-        {} if other is None else {str(c): n for n, c in reversed(list(enumerate(other.columns)))}
-    )
+def _frame_table(
+    name: str, columns: Mapping[str, pd.Series], views: dict[str, CellView]
+) -> TableBatches:
+    """The first columns of a frame as Arrow, for the detectors and value tallies only: identity
+    and distinct counts were read from the cells before this (`CellView`). A column Arrow will
+    not take (mixed int and str, a set) is carried as the text the detectors read. A refused
+    column is a null placeholder of its length, so no conversion or detector sees its cells."""
     arrays = []
-    for n, series in enumerate(frame.iloc[:, i] for i in range(len(names))):
-        paired = names[n] in other_at and other is not None
-        native = _native(series)
-        if paired and other is not None:
-            native = native if _native(other.iloc[:, other_at[names[n]]]) is not None else None
-        arrays.append(native if native is not None else _text(series))
-    return from_table(name, pa.Table.from_arrays(arrays, names))
+    for column, series in columns.items():
+        if views[column].refused:
+            arrays.append(pa.nulls(len(series)))
+            continue
+        # A cell the detectors cannot read (`UnreadableCellError`) fails the table, as before.
+        array = _native(series)
+        arrays.append(pa.array(detector_text(series), pa.string()) if array is None else array)
+    table = from_table(name, pa.Table.from_arrays(arrays, list(columns)))
+    return replace(table, cell_views=views)
+
+
+def _frame_identity(
+    src: pd.Series, out: pd.Series, src_view: CellView, out_view: CellView
+) -> IdentityFacts | IdentityFailure:
+    refused = src_view.refused or out_view.refused
+    return IdentityFailure(refused) if refused else compare_or_failure(src, out)
 
 
 def _frame_tables(
     source_frames: dict[str, pd.DataFrame], output_frames: dict[str, pd.DataFrame]
 ) -> tuple[dict[str, TableBatches], dict[str, TableBatches], dict[str, str]]:
-    """Both sides as tables. A name whose frame cannot be converted at all is left out of both
-    and recorded with the error's class name, so the other tables are still checked."""
+    """Both sides as tables. Each column's identity and distinct counts are read from the frame
+    cells first, so no Arrow conversion decides them. A name whose frame cannot be converted at
+    all is left out of both and recorded with the error's class name."""
     src: dict[str, TableBatches] = {}
     out: dict[str, TableBatches] = {}
     failed: dict[str, str] = {}
     for name, out_frame in output_frames.items():
         try:
             src_frame = source_frames.get(name)
-            out_table = _frame_table(name, out_frame, src_frame)
+            identity: dict[str, IdentityFacts | IdentityFailure] | None = None
             if src_frame is not None:
-                src[name] = _frame_table(name, src_frame, out_frame)
-            out[name] = out_table
+                src_cols = _first_columns(src_frame)
+                src_views = {c: cell_view(series) for c, series in src_cols.items()}
+                src[name] = _frame_table(name, src_cols, src_views)
+            out_cols = _first_columns(out_frame)
+            out_views = {c: cell_view(series) for c, series in out_cols.items()}
+            out_table = _frame_table(name, out_cols, out_views)
+            if src_frame is not None and len(src_frame) == len(out_frame):
+                identity = {
+                    c: _frame_identity(src_cols[c], series, src_views[c], out_views[c])
+                    for c, series in out_cols.items()
+                    if c in src_cols
+                }
+            out[name] = replace(out_table, identity=identity)
         except Exception as exc:
             if passes_through(exc):
                 raise
@@ -252,6 +274,7 @@ def _assemble(
     tables_checked: tuple[str, ...],
     models: tuple[Mapping[str, pd.DataFrame], DetectorSet] | None = None,
     distribution: DistributionInput | None = None,
+    writes: Mapping[str, TableWrites] | None = None,
 ) -> dict[str, Any]:
     residual_pii: list[ResidualPIIFinding] = []
     fk_preservation: list[FKPreservationFinding] = []
@@ -283,20 +306,15 @@ def _assemble(
     failed = {**failed, **suite_failed}
 
     try:
-        residual_pii = check_residual_pii(facts, config, failed)
+        if writes is None:
+            writes = standalone_writes(
+                config, {n: t.schema.names for n, t in output_tables.items()}
+            )
+        residual_pii = check_residual_pii(facts, config, failed, writes=writes)
     except Exception as exc:
         if passes_through(exc):
             raise
-        residual_pii = [
-            ResidualPIIFinding(
-                table="",
-                column="",
-                detector_id="",
-                match_rate=0.0,
-                severity="error",
-                message=f"residual_pii check raised {type(exc).__name__} (see job log for details)",
-            )
-        ]
+        residual_pii = [residual_pii_error("", type(exc).__name__)]
 
     # Model passes sit outside the wrapper above: it would replace every regex finding with one
     # error row, and hide that the error came from a model.
@@ -416,6 +434,7 @@ def _suite_facts(
                 scratch=scratch,
                 memory_limit=memory_limit,
                 value_columns=distribution_value_columns(distribution, name),
+                identity=table.identity,
             )
         except Exception as exc:
             if passes_through(exc):

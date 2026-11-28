@@ -398,6 +398,11 @@ SOURCES: tuple[Source, ...] = (
         in_code("test_file_access_entry_points.py", "INTERNAL_SEAMS"),
     ),
     Source(
+        "cell-text-names",
+        "test_cell_text_choke_point.py",
+        in_code("test_cell_text_choke_point.py", "ALLOWLIST"),
+    ),
+    Source(
         "post-scan-route-exempt",
         "test_post_scan_route_guard.py",
         in_code("test_post_scan_route_guard.py", "EXEMPT"),

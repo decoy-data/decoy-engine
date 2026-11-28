@@ -614,7 +614,7 @@ def _custom_pair(bundle: Any) -> list[dict[str, Any]]:
 
 
 def test_composite_custom_bundle_output_is_read() -> None:
-    from decoy_engine.execution._column_access import column_access
+    from decoy_engine.plan.column_access import column_access
 
     cols = _custom_pair(_BUNDLE)
     assert _scan(cols, ["c"]) == {"c"}
@@ -634,7 +634,7 @@ def test_malformed_composite_bundle_leaves_no_passthrough_column(bundle: Any) ->
     may be carried or restored (`handler_written_columns` is None), rather than an unknown
     read that sends every passthrough column through pandas."""
     from decoy_engine.execution._chunked_carry import passthrough_columns
-    from decoy_engine.execution._column_access import column_access, handler_written_columns
+    from decoy_engine.plan.column_access import column_access, handler_written_columns
 
     cols = _custom_pair(bundle)
     assert column_access(cols[0], REG).writes_unknown is True
@@ -648,7 +648,7 @@ def test_malformed_composite_bundle_leaves_no_passthrough_column(bundle: Any) ->
 def test_lone_fixed_composite_reads_its_other_canonical_columns(
     provider: str, strategy: str
 ) -> None:
-    from decoy_engine.execution._column_access import column_access
+    from decoy_engine.plan.column_access import column_access
 
     own, others = _FIXED[provider]
     entry = _composite_entry(own, provider, strategy)
@@ -658,7 +658,7 @@ def test_lone_fixed_composite_reads_its_other_canonical_columns(
 
 @pytest.mark.parametrize("provider", sorted(_FIXED))
 def test_lone_fixed_composite_with_when_keeps_the_full_declaration(provider: str) -> None:
-    from decoy_engine.execution._column_access import column_access
+    from decoy_engine.plan.column_access import column_access
 
     own, others = _FIXED[provider]
     entry = {**_composite_entry(own, provider), "when": f"{own} == 'never'"}
@@ -863,7 +863,7 @@ def test_masked_and_read_nested_columns_run_in_either_source_order(order: tuple[
 def test_predicate_names_declines_every_non_plain_string_shape(expr: str) -> None:
     # PEP 701 (3.12) splits an f-string into FSTRING_* tokens that expose the braced names, so
     # a STRING-only check would collect `secret_col` instead of declining.
-    from decoy_engine.execution._column_access import predicate_names
+    from decoy_engine.plan.column_access import predicate_names
 
     assert predicate_names(expr) is None
 
@@ -873,7 +873,7 @@ def test_predicate_names_fails_closed_on_a_token_kind_it_does_not_know(monkeypat
     # future tokenizer (as FSTRING_START was) must decline, not be silently skipped.
     import pandas.core.computation.parsing as parsing
 
-    from decoy_engine.execution._column_access import predicate_names
+    from decoy_engine.plan.column_access import predicate_names
 
     unknown_kind = 9999
     monkeypatch.setattr(

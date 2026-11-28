@@ -21,6 +21,7 @@ import pandas as pd
 
 from decoy_engine.detection.domains import domain_for
 from decoy_engine.detection.types import DetectorMatch
+from decoy_engine.internal.cell_text import column_text
 
 # ── thresholds ──
 #
@@ -49,7 +50,7 @@ class PreparedValues:
     __slots__ = ("codes", "counts", "n", "raw_uniques", "uniques")
 
     def __init__(self, series: pd.Series) -> None:
-        strs = series.dropna().astype(str)
+        strs = column_text(series)
         codes, uniques = pd.factorize(strs, sort=False)
         self.n: int = len(strs)
         self.codes: np.ndarray = codes
@@ -254,7 +255,7 @@ def _evaluate(
     return DetectorMatch(
         detector_id=detector_id,
         match_rate=round(rate, 4),
-        sample_misses=[str(m) for m in misses],
+        sample_misses=misses,
         format_pattern=format_pattern,
         format_pattern_complete=complete,
         confidence=confidence,

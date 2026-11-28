@@ -88,13 +88,18 @@ def _whole(key: pd.DataFrame) -> pd.DataFrame:
 
 
 def _integral(column: pd.Series) -> bool:
-    # One NumPy view for every float dtype; a null is NaN there and is left out.
-    values = column.to_numpy(dtype="float64", na_value=np.nan)
-    values = values[~np.isnan(values)]
+    # One NumPy view for every float dtype: a nullable Float column casts to Int64 by truncating.
+    values = pd.Series(column.to_numpy(dtype="float64", na_value=np.nan)).dropna()
     # An all-null column carries no evidence that it was an integer column.
-    return values.size > 0 and bool(
-        np.all((values == np.trunc(values)) & (values >= -(2.0**63)) & (values < 2.0**63))
-    )
+    if values.empty:
+        return False
+    # pandas' safe cast refuses a fraction, an infinity and a value outside the Int64 range.
+    try:
+        with np.errstate(invalid="ignore"):
+            values.astype("Int64")
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return True
 
 
 def _finding(

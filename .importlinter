@@ -54,6 +54,19 @@ ignore_imports =
     decoy_engine.telemetry._recorder -> decoy_engine.progress
     decoy_engine.telemetry._vocab -> decoy_engine.progress
 
+# The cell readers inside `internal` (PM-1 redesign R2-D1): the comparison authority sits on the
+# detector text reader, which sits on the shared atoms, which sit on the missing-cell predicate.
+# Neither reader may import the one above it, so a temporal or number rule has one home.
+[importlinter:contract:cell-readers]
+name = the cell readers import downward only
+type = layers
+containers = decoy_engine.internal
+layers =
+    cell_identity
+    cell_text
+    cell_atoms
+    pandas_missing
+
 # Policy direction (R1, engine clean-architecture review 2026-11-21, "The layer sentry" rec. 3).
 # The tier order above is a measured order, so `connectors`, `io` and `fileaccess` sit below
 # `plan` and a new policy -> I/O import would pass it. This contract forbids those edges
