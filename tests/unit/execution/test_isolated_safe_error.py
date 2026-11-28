@@ -439,7 +439,7 @@ class TestReadbackProducers:
             def raising(handle, **kwargs):
                 raise fail
 
-            monkeypatch.setattr(arrow_adapter, "read_table", raising)
+            monkeypatch.setattr(arrow_adapter, "read_staged_table", raising)
         cfg = support.job(tmp_path, 3)
         return run_pipeline_isolated(cfg, None, engine_version=_ENGINE_VERSION)
 

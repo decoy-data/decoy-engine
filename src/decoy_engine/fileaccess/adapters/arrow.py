@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, BinaryIO, TypeVar
 
 import pyarrow as pa
 import pyarrow.ipc
@@ -61,6 +61,19 @@ def read_table(handle: FileHandle, **kwargs: Any) -> pa.Table:
     return guarded(handle.display, _strict(handle), pq.read_table, handle.library_path(), **kwargs)
 
 
+_T = TypeVar("_T")
+
+
+def _read_single_file(handle: FileHandle, read: Callable[[BinaryIO], _T]) -> _T:
+    """Close the input even when Arrow retains its scanner or rejects a corrupt footer."""
+    with guarded(handle.display, _strict(handle), handle.open_binary) as source:
+        return guarded(handle.display, _strict(handle), read, source)
+
+
+def read_staged_table(handle: FileHandle) -> pa.Table:
+    return _read_single_file(handle, pq.read_table)
+
+
 def parquet_file(handle: FileHandle, **kwargs: Any) -> pq.ParquetFile:
     return guarded(handle.display, _strict(handle), pq.ParquetFile, handle.library_path(), **kwargs)
 
@@ -90,7 +103,7 @@ def iter_staged_batches(parquet_file: pq.ParquetFile, **kwargs: Any) -> Iterator
 
 
 def read_metadata(handle: FileHandle) -> pq.FileMetaData:
-    return guarded(handle.display, _strict(handle), pq.read_metadata, handle.library_path())
+    return _read_single_file(handle, pq.read_metadata)
 
 
 class _FileBacked:

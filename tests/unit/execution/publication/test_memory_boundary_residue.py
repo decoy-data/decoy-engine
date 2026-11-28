@@ -18,13 +18,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from decoy_engine import fileaccess
 from decoy_engine.execution import run_pipeline_isolated
 from decoy_engine.fileaccess import _errors, _local
 from tests.unit.execution.publication._isolated_support import ENGINE_VERSION, sources
-from tests.unit.execution.publication.test_isolated_commit_memory import CANARY
+from tests.unit.execution.publication.test_isolated_commit_memory import CANARY, a_run
 from tests.unit.execution.publication.test_isolated_readback_cap import scratch  # noqa: F401
 from tests.unit.execution.publication.test_memory_boundary_routes import Route, raises_memory
 
@@ -89,6 +91,48 @@ def test_a_failed_abort_removal_still_closes_the_held_descriptor(
     assert fired
     assert txn._held.fd == -1  # closed before the error reached the caller
     txn.abort()  # a second abort returns early and stays quiet
+
+
+@pytest.mark.parametrize("memory_failure", [False, True], ids=["success", "memory_failure"])
+def test_a12_staged_decode_closes_its_file_even_if_arrow_retains_the_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scratch: Path,  # noqa: F811
+    memory_failure: bool,
+) -> None:
+    run = a_run(tmp_path, monkeypatch)
+    read_table = pq.read_table
+    retained: list[Any] = []
+    closed_at_removal: list[bool] = []
+    remove_tree = fileaccess.remove_tree
+
+    def read(source: Any, **kwargs: Any) -> pa.Table:
+        # Model a scanner retaining its input. A pathname makes the scanner open its own file.
+        stream = pa.OSFile(source, "rb") if isinstance(source, (str, os.PathLike)) else source
+        retained.append(stream)
+        table = read_table(stream, **kwargs)
+        if memory_failure:
+            raise MemoryError
+        return table
+
+    def remove(path: Path) -> None:
+        if Path(path).name == "staging_output":
+            closed_at_removal.extend(stream.closed for stream in retained)
+        remove_tree(path)
+
+    monkeypatch.setattr(pq, "read_table", read)
+    monkeypatch.setattr(fileaccess, "remove_tree", remove)
+    try:
+        result = run.go(held={}, output=False)
+        if memory_failure:
+            assert result.reason is not None and result.reason.code == "process_out_of_memory"
+        else:
+            assert result.outcome == "completed"
+        assert closed_at_removal == [True]
+        assert list(scratch.iterdir()) == []
+    finally:
+        for stream in retained:
+            stream.close()
 
 
 def test_a_fault_in_the_scratch_stage_removal_is_not_a_completed_run(

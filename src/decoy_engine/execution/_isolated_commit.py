@@ -397,13 +397,9 @@ class _Readback:
         """The rows and Arrow schema from the footer alone; nothing is decoded and the file is
         closed again before the table is read."""
         request = _staged_request(self._staging, name)
-        with (
-            fileaccess.capture().open_read(request) as handle,
-            arrow_adapter.parquet_file(handle) as parquet_file,
-        ):
-            return lazy_spec(
-                parquet_file.metadata.num_rows, parquet_file.schema_arrow, charge_pandas=False
-            )
+        with fileaccess.capture().open_read(request) as handle:
+            metadata = arrow_adapter.read_metadata(handle)
+        return lazy_spec(metadata.num_rows, metadata.schema.to_arrow_schema(), charge_pandas=False)
 
 
 def _staged_request(staging: Path, name: str) -> FileRequest:
@@ -413,7 +409,7 @@ def _staged_request(staging: Path, name: str) -> FileRequest:
 def _read_staged(staging: Path, name: str) -> pa.Table:
     """One admitted staged table, read through the file-access choke point."""
     with fileaccess.capture().open_read(_staged_request(staging, name)) as handle:
-        return arrow_adapter.read_table(handle)
+        return arrow_adapter.read_staged_table(handle)
 
 
 def result_from_envelope(

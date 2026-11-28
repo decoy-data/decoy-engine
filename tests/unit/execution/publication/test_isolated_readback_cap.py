@@ -102,7 +102,7 @@ class Decodes:
         self.names: list[str] = []
         self.fail_on: int | None = None
         self.error: BaseException | None = None
-        real = arrow_adapter.read_table
+        real = arrow_adapter.read_staged_table
 
         def spy(handle: Any, **kwargs: Any) -> pa.Table:
             self.names.append(Path(str(handle.display)).name)
@@ -110,7 +110,7 @@ class Decodes:
                 raise self.error
             return real(handle, **kwargs)
 
-        monkeypatch.setattr(arrow_adapter, "read_table", spy)
+        monkeypatch.setattr(arrow_adapter, "read_staged_table", spy)
 
 
 @pytest.fixture
