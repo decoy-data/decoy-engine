@@ -47,6 +47,16 @@ class DatetimeBucket:
     count: int | float
 
 
+def names_year_beyond(buckets: Sequence[DatetimeBucket], ceiling: int) -> bool:
+    """True when a live bin (positive weight) starts before MIN_YEAR or ends after `ceiling`.
+
+    One predicate for every route; only the ceiling differs (MAX_SAMPLED_YEAR for a window,
+    MAX_BIN_YEAR for statistical admission). A zero-weight bin is never drawn."""
+    return any(
+        b.count > 0 and not (b.start_year >= MIN_YEAR and b.end_year <= ceiling) for b in buckets
+    )
+
+
 class DatetimeBucketV2(BaseModel):
     """The stored v2 bucket. Strict: a bool, string or float is not a year or a count."""
 

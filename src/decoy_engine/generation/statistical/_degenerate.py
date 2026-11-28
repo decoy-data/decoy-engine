@@ -21,9 +21,9 @@ from decoy_engine import reasons
 from decoy_engine._config_text import Name, Problem, config_position, config_refusal
 from decoy_engine.contracts.distribution_snapshot import (
     MAX_BIN_YEAR,
-    MIN_YEAR,
     SAMPLED_YEARS_RULE,
     names_unsupported_year,
+    names_year_beyond,
 )
 
 if TYPE_CHECKING:
@@ -146,10 +146,7 @@ def names_far_year(spec: StatisticalSpec) -> bool:
     buckets = spec.datetime_buckets
     if buckets is None:
         return names_unsupported_year(spec.stats)
-    return any(
-        b.count > 0 and not (b.start_year >= MIN_YEAR and b.end_year <= MAX_BIN_YEAR)
-        for b in buckets
-    )
+    return names_year_beyond(buckets, MAX_BIN_YEAR)
 
 
 def degenerate_finding(spec: StatisticalSpec) -> tuple[str, str] | None:
