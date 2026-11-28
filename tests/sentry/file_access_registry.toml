@@ -5,7 +5,7 @@
 # `dir_category` (protected_root, protected_child, output_parent, published_output, non_row) and
 # `dir_test` (an existing pytest node id; every category but protected_root) mark directory
 # creators for tests/sentry/protected_dir (G-ONE-PROTECTED-DIR).
-# Count: 206 (asserted by the sentry).
+# Count: 205 (asserted by the sentry).
 
 [[entry]]
 module = "decoy_engine/connectors/sftp.py"
@@ -1954,15 +1954,6 @@ rule = "a directory this call just created and found half-protected (the owner-o
 owner = "cam"
 reason = "the allocator removes only a directory it created itself, so no half-protected directory is left behind"
 
-
-[[entry]]
-module = "decoy_engine/fileaccess/_fdtree.py"
-function = "remove_confirmed"
-sink = "decoy_engine.fileaccess._fdtree.remove_tree"
-ordinal = 0
-rule = "a path an owner (the cleanup ledger or a local stage transaction) holds: the operand it recorded when it created it, never a caller-supplied path"
-owner = "cam"
-reason = "removal is confirmed by a no-follow lookup afterwards, so a holder keeps ownership until the name is gone"
 
 [[entry]]
 module = "decoy_engine/fileaccess/cleanup/_ledger.py"
