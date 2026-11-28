@@ -2,13 +2,98 @@ Status: plan
 
 # DATE-RANGE-SENTINEL: a date a strategy cannot compute is refused unless the column declares it as a sentinel
 
-Owner: Cam. Author: Opus (Architect). Date: 2026-11-27. Revision 3 (after review round 2, with Q1 to Q5 settled in section 15). Revision 4 adds section 4.4b after S5 code review round 2. Revision 5 (2026-11-28) redesigns S5 in section 4.4b after the S5 build failed six code-review rounds, splits it into S5a and S5b, and records Q6 as decided A. Revision 6 (2026-11-28) fixes Dennis plan review round 1 (section 17.3): S5 anchors move to `origin/main` `d1d7453ac`, after #799. Revision 7 (2026-11-28) addresses Dennis round 2 against main at `395c1c662`, including #830. Revision 8 (2026-11-28) addresses the outside Codex review of plan head `f82252693`. Revision 9 (2026-11-28) addresses the review of `fb84f0204` against `395c1c662`. Roadmap row: DATE-RANGE-SENTINEL (engine 1.0). Anchors are in this repository (decoy-engine) at `origin/main` `f54ad388b` unless marked `PM-1:` (branch `fix/postmask-fail-closed`, `docs/plans/2026-11-27-pm1-canonical-cell-walk.md`).
+Owner: Cam. Author: Opus (Architect). Date: 2026-11-27. Revision 3 (after review round 2, with Q1 to Q5 settled in section 15). Revision 4 adds section 4.4b after S5 code review round 2. Revision 5 (2026-11-28) redesigns S5 in section 4.4b after the S5 build failed six code-review rounds, splits it into S5a and S5b, and records Q6 as decided A. Revision 6 (2026-11-28) fixes Dennis plan review round 1 (section 17.3): S5 anchors move to `origin/main` `d1d7453ac`, after #799. Revision 7 (2026-11-28) addresses Dennis round 2 against main at `395c1c662`, including #830. Revision 8 (2026-11-28) addresses the outside Codex review of plan head `f82252693`. Revision 9 (2026-11-28) addresses the review of `fb84f0204` against `395c1c662`. Revision 10 (2026-11-28) puts the S5a scope to the owner as Q9 (section 0), writes S5a for Option A with the owner's Q7 = A and Q8 = A, states S5b as a standalone slice with the two r3 S5b fixes (section 4.4c), and moves superseded detail to Appendix B. Roadmap row: DATE-RANGE-SENTINEL (engine 1.0). Anchors are in this repository (decoy-engine) at `origin/main` `f54ad388b` unless marked `PM-1:` (branch `fix/postmask-fail-closed`, `docs/plans/2026-11-27-pm1-canonical-cell-walk.md`).
 
 Rules consulted: dev-rules `README.md`, `00-universal.md`, `risk-and-exceptions.md`, `development-loop.md` (PLAN: guarantee, size, design notes, choke point, placement, established solutions), `bugfix.md`, `api-and-compatibility.md` (one new reason code, three deprecations, a config key on one more strategy), `catalogs/recurring-defects.md` (11 classes), `cross-cutting-concerns.md` (one rule, many routes), `testing.md` (test depth T0 to T4). Revision 5 also consulted the bound registry (`tests/sentry/ratchet/_limit_constants.py`, `tests/sentry/baselines/sentry-limits.json`) and, as established solutions, Arrow's dictionary semantics (a slice keeps its dictionary; some dictionaries cannot be unified, as covered in AT-V14; `to_pandas` converts the whole dictionary), pyarrow's tz resolver (`pyarrow.lib.string_to_tzinfo`, the tzinfo `to_pandas` and `as_py` receive) for offsets, and Hypothesis property tests against an independent oracle. Engine `CLAUDE.md` file-size rule; engine `CONTRIBUTING.md` reason rule (`since=UNRELEASED`, deprecation with `replaced_by`).
 
 Risk: R2. It changes what a date strategy does with a far date on every route, adds a reason code and deprecates three, and turns a quarantinable row error into a refusal. Plan review: Dennis, then Codex. Code gate: Codex, then Dennis for S1, S2, S3, S5, S6, S7 and S8; Codex only for S4. Full suite before merge: S1, S2, S3 and S5 for reasons, and S7 for snapshot serialization; the other slices by their own triggers (section 14).
 
 Owner decision (2026-11-27): a date outside the range a strategy can compute is rejected, unless the column declares it as a sentinel to ignore. Sentinel rows skip the strategy and come out unchanged.
+
+## 0. S5 redesign: owner question Q9 (revision 10)
+
+Three Codex plan rounds on revisions 7 to 9 (`~/scratch/codex-s5-plan-r1.out`, `-r2.out`, `-r3.out`) each closed the cases they named and then found the same class one layer deeper. Every new finding came from an Arrow or pandas encoding that the conversion treats specially:
+
+- pandas metadata restores a time zone that the physical Arrow type does not carry (round 2), and an `ArrowDtype` spelling in the metadata restores another unit or zone the same way (round 3);
+- two valid `int8` date dictionaries whose union needs a wider index fail in the carried profile (round 2), then the same union fails in AUTO's `concat_tables(...).combine_chunks()` and in the legacy collector (round 3);
+- the round 2 fix for the profile union adds a row-sized index allocation (round 3).
+
+Exact route parity on these encodings keeps adding machinery, so the S5a scope is put to the owner as Q9 (section 15). The owner decided Q7 = A (pandas floor 2.x) and Q8 = A (one rule on every route) on 2026-11-28. Plain `date32`, `date64` and `timestamp` cells keep that one rule on every route, passthrough included: no round after revision 7 found a defect in the plain-cell rule. S1 to S4, S5b and S6 to S8 do not depend on Q9.
+
+In this section, an *exotic encoding* is one of:
+
+- a dictionary whose value type holds a date (`dictionary<date32>`, `dictionary<timestamp[us, UTC]>` and so on);
+- a field whose pandas metadata gives it an effective type different from its physical Arrow type (section 4.4b rule 3);
+- a `date64` column with a non-null value that is not a whole number of days.
+
+A column is *date-strategy-read* when the run's config gives it `date_shift` or `bucket_perturb` (the strategies that build the range and sentinel rule of S1), or uses it as a `windowed_date` anchor. A column that is passed through, kept, hashed, redacted, tokenized or profiled is not date-strategy-read. Stored pandas index fields are never date-strategy-read.
+
+### 0.1 Option A (recommended): refuse exotic encodings only where a date strategy reads them
+
+At `check_source_dates`, the one source-date boundary:
+
+1. A date-strategy-read column in an exotic encoding is refused with the existing type refusal `runtime/source_date_type_unsupported` and one new kind token: `dictionary`, `pandas_metadata` or `date64_time_of_day`. The refusal names table, column and kind, carries no count and no value, and names the fix: cast the column to a plain date or timestamp column (section 4.4b, rule 6, gives the literal texts).
+2. A column in an exotic encoding that no date strategy reads is not judged by S5. It keeps main's behavior on every route: main's conversion, main's carry, and main's own coded refusal from #799 where pandas cannot hold it. This keeps working jobs working. Refusing such a column would be a V1 function break.
+3. Every other date column is a plain `date32`, `date64` or `timestamp` column, and the plain-cell rule (Q8 = A) judges it on every route. For an unread `date64` with a time of day the rule judges the cell's whole day, as main's conversion reads it.
+
+The `dictionary` and `pandas_metadata` kinds are decided from the schema and the config only, so for a date-strategy-read column they give one answer on every route, layout and ISO mode, including empty and all-null columns. The `date64_time_of_day` kind needs one bounded scan of the logical values.
+
+Inputs that stay admitted for date strategies (controls in AT-V19 and AT-V21): pandas metadata that matches the physical type, as `pa.Table.from_pandas` writes it for naive, zoned, `date` and `ArrowDtype` columns, and a pandas-written zoned Parquet file read back at `us` whose `numpy_type` still says `datetime64[ns]`. A numpy spelling never changes the effective type. On pyarrow 24.0.0 and pandas 2.3.3 that file converts to `datetime64[us, America/New_York]` (probe, 2026-11-28).
+
+**What A refuses that main reads today.** Only date-strategy-read columns change outcome because of Q9. The last column shows which rows the decided Q8 = A already refuses under revision 9 (only the code changes) and which rows are new because of Q9. Comparison rows refer to Appendix B.1.
+
+| # | Date-strategy-read input | Main at `395c1c662` | Under A | Already refused by Q8 = A (revision 9)? |
+|---|---|---|---|---|
+| E1 | a date dictionary whose entries are all in years 1 to 9999, unique, with a signed index (comparison rows 1 and 4; fixture F3) | the strategy receives a pandas categorical of dates | refused, kind `dictionary` | no: **new with Q9** |
+| E2 | a date dictionary with an entry outside years 1 to 9999 in a non-ns unit, or an unused zoned ns edge entry (rows 5 and 7; fixture F2) | the strategy receives the converted rows | refused, kind `dictionary` | yes, with `source_date_unrepresentable` |
+| E3 | a date dictionary main cannot convert: far, `INT64_MIN`, null or duplicate entries, a `uint64` index (rows 2, 6, 12, 15; fixture F9) | already refused with #799's code on converting routes | refused, kind `dictionary` | yes |
+| E4 | a timestamp whose pandas metadata restores another zone or another `ArrowDtype` unit or zone, with ordinary values (fixture F11) | restoring reads give the strategy the metadata type; metadata-ignoring reads give it the physical type | refused, kind `pandas_metadata` | no: **new with Q9** |
+| E5 | the same with an edge value (physical UTC ns `INT64_MIN + 42` restored to New York; a `us` tick of 1 restored to `timestamp[s][pyarrow]`) | restoring reads fail with timestamp text in the message or a precision error; metadata-ignoring reads succeed | refused, kind `pandas_metadata` | yes, with `source_date_unrepresentable` |
+| E6 | a `date64` with a time of day (for example 1 ms; fixture F12) | the strategy receives the date with the time of day dropped | refused, kind `date64_time_of_day` | yes, with `source_date_unrepresentable` |
+
+Per route. "Q9" marks a row A refuses where main reads the input today. "Q8" marks a row the decided Q8 = A already refuses (only the code changes). "fails" means main already fails. "none" means no input of that kind can reach the route. The builder re-pins each "Q9" cell on main, red-first, in AT-V16. If main already fails on a cell, the builder records it and the cell moves to "fails".
+
+| Route (date strategy configured on the column) | E1 | E2 | E3 | E4 | E5 | E6 |
+|---|---|---|---|---|---|---|
+| FF and AUTO, resident Arrow or loader | Q9 | Q8 | fails | Q9 | Q8 | Q8 |
+| SEQ, loader (Arrow) | Q9 | Q8 | fails | Q9 | Q8 | Q8 |
+| OOC Python and native, resident `sources` | Q9 | Q8 | fails | Q9 | Q8 | Q8 |
+| CH and NCH, Arrow batches (the configured column is converted or computed natively, never carried) | Q9 | Q8 | fails | Q9 | Q8 | Q8 |
+| PAN `run` and `run_single` | Q9 | Q8 | fails | Q9 | Q8 | Q8 |
+| ISO on and off, resident Arrow | Q9 | Q8 | fails | Q9 | Q8 | Q8 |
+| FF, AUTO, SEQ and OOC on Parquet, CLOUD and HIVE | none | none | none | Q9 | Q8 | none |
+| PROF (resident or Parquet), and any route where no date strategy reads the column | not judged: main's behavior | same | same | same | same | same |
+
+Parquet stores no date dictionary and no sub-day `date64`, so E1 to E3 and E6 reach a date strategy only as caller-built Arrow (resident `sources`, a `source_loader` result, chunked API input). A pandas frame with a categorical of dates becomes a date dictionary under `pa.Table.from_pandas`, so an SDK caller that shifts such a column must decode it first. E4 and E5 can arrive through Parquet, because Parquet keeps the pandas metadata of the table it was written from. They need metadata that was not updated after a column type changed. The changelog, `docs/strategies.md` and the compatibility contract list E1 to E6.
+
+What A removes from the revision 9 S5a design: the dictionary structure rule and its count, the bounded index windows, the ISO parent projection of original dictionaries and its RSS bound, the carried-profile index widening, the two metadata interpretations, the disjoint-dictionary and AUTO-join cases, and mutations M-43, M-44, M-50, M-54, M-55 and M-57.
+
+### 0.2 Option B: keep parity on the encodings
+
+Admit date dictionaries and metadata-restored timestamps on every route, as revision 9 does under Q8 = A, and change every operation that the encodings still break. After three rounds the known list is:
+
+1. Metadata restoration (rounds 2 and 3). Extend the shared schema fact from `datetimetz` zones to the effective `ArrowDtype`: unit, zone and exact divisibility of each tick into the restored unit. Under Q8 = A, check the physical and every restorable interpretation.
+2. Carried profile (`profile/arrow/_walk_arrow.py:44`, rounds 2 and 3). Profile differing chunk dictionaries without unifying them into the original index width, and without a row-sized index allocation when the union fits.
+3. AUTO join (`execution/_pipeline_auto_chunk.py:144`, `join_dispatcher_chunks`, round 3). Do not call `combine_chunks()` on a union that does not fit the index type. Keep the chunks, or widen only when needed.
+4. Legacy collector (`execution/_chunked.py:585`, `concat_masked_chunks`) and sink join (`execution/_chunked_output_sink.py:397`): the same union.
+5. Dictionary admission (revision 9 rules 3 and 4, Appendix B.4): index types, per-chunk uniqueness, null and unused entries, bounded cross-window uniqueness and reference counting.
+6. Isolation: the parent projection of the original dictionaries before `to_batches()` drops empty chunks, and its scratch bound.
+7. Writers that receive a date dictionary output (Parquet, CSV and IPC sinks, the fidelity report, post-scan). No review has listed them. Each one can be the next finding.
+8. Unaligned `date64`: refused on every route under Q8 = A, including on columns no strategy reads, so B also narrows main for carried sub-day `date64`.
+
+Memory tests B needs: Arrow pool peak on the small-union profile and on the AUTO join; 200-category correctness on the profile, AUTO, legacy and sink joins; the million-category parent RSS bound (revision 9 AT-V15, M-57); the 10M-row pass-path bound (M-55).
+
+Under Q8 = A, B also refuses the E2, E3, E5 and E6 inputs on columns that no date strategy reads (for example an NCH carry of a dictionary with an unused far entry). Main returns those today.
+
+Size: revision 9 S5a (about 750 new or changed lines) plus about 300 source and 600 test lines for items 1 to 4, 6 and 7. That is about 1,650 new or changed lines in three PRs (Appendix A), about three days before review. Each of the last three rounds found a new operation, so B should expect more review rounds, and any of them can add a slice.
+
+### 0.3 Recommendation, and how Q9 combines with Q7 and Q8
+
+The planner recommends A. For a date-strategy-read column, A decides from the schema and the config, plus one integer test for `date64`, before any read. Every column a date strategy computes on is then a plain column whose cells the plain rule judges, so no strategy input can reach a pandas or Arrow operation the plan has not listed. Columns no date strategy reads keep main's behavior, so no working passthrough, keep, hash, redact, tokenize or profile job changes because of Q9. The cost is E1 and E4 for date strategies, each with a one-line fix.
+
+- **Q8 = A (decided).** The plain-cell rule runs on every route, passthrough included. Under Q9 = A this creates one asymmetry the owner should know about: a far plain date that no strategy reads is refused, but the same far date inside an unread date dictionary, or under stale pandas metadata, is carried as main carries it. Removing the asymmetry means judging unread exotic encodings, which is Option B. Under Q9 = B, Q8 = A applies to the encodings too: every route refuses E2, E3, E5 and E6, read or not.
+- **Q7 = A (decided).** pandas 2.x is the floor, so the plain rule keeps the source timestamp unit and needs no pandas 1.x bounds. Neither Q9 option depends on the pandas version. DEP-FLOOR raises the declared floor (section 14).
+- The rest of this plan follows Q9 = A. Appendix A lists the extra slices if the owner picks B. S5a can be built on Q9 = A and waits for the owner's Q9 answer before merge.
 
 ## 1. Frame
 
@@ -43,7 +128,7 @@ Cells: text `"9999-12-31"`, `"0001-01-01"`, `"1600-01-01"` with `date_format="%Y
 | O | any strategy, `date32` year 10183 | every route but native chunked | uncoded `ValueError: year 10183 is out of range` from the profile sampler (`profile/_readers.py:499`) quoting the year at `f54ad388b` |
 | P | date_shift or bucket_perturb with `preserve_values=["9999-12-31","0001-01-01"]` | every route above | the listed sentinels come out unchanged and are counted; undeclared far rows still behave as A to I |
 
-Row O update (2026-11-28, after #799): the profile sampler now refuses with the value-free `source_column_unrepresentable`. NCH passthrough returns the column. S5a gives both the date refusal (comparison rows 3 and 13, subject to Q8).
+Row O update (2026-11-28, after #799): the profile sampler now refuses with the value-free `source_column_unrepresentable`. NCH passthrough returns the column. S5a gives both the date refusal (comparison rows 3 and 13, Q8 = A).
 
 Side finding, out of scope: shuffle over a `timestamp[ns]` column returns `timestamp[us]` on full_frame (follow-up G-3).
 
@@ -110,7 +195,7 @@ The input range is the compute domain of the primitive, less the reach of the st
 | statistical generation (S7) | fitted datetime snapshot | 0001-01-01 to 9998-12-31 (existing `MIN_YEAR`/`MAX_SAMPLED_YEAR`) | none |
 | distribution generator (S5) | fitted `min`/`max` | the text domain (ns math at `generators/_distribution.py:410-416`) | none |
 
-S5 owns the distribution ns bounds used in fitted admission. S1 and S5 reuse the whole-day ns endpoints from a single calendar-range definition in the lower-tier contracts module, landed by S5. S1 imports those names. The transforms table imports `MIN_YEAR` and `MAX_SAMPLED_YEAR` from `contracts/distribution_snapshot.py:31-32`. The decoder uses its own contract constants and never imports transforms. Both fitted generators refuse an unsupported snapshot with `plan/generation_unbounded_column`. Validate bounds and every live bin before a draw, including single-value and direct generator entry points. Use the same admission check at plan compile and for direct calls without a compiled plan. For the distribution generator, clip the first and last year on calendar bounds before constructing ns endpoints. Test 1677 and 2262 as well as out-of-domain bins with ordinary min/max. Explicitly convert to ns before integer arithmetic on every supported pandas version.
+S5 owns the distribution ns bounds used in fitted admission. S1 and S5 reuse the whole-day ns endpoints from a single calendar-range definition in the lower-tier contracts module, landed by S5. S1 imports those names. The transforms table imports `MIN_YEAR` and `MAX_SAMPLED_YEAR` from `contracts/distribution_snapshot.py:31-32`. The decoder uses its own contract constants and never imports transforms. Both fitted generators refuse an unsupported snapshot with `plan/generation_unbounded_column`. Validate bounds and every live bin before a draw, including single-value and direct generator entry points. The fitted distribution sampler has no plan compile path, so it checks at its direct entry; the statistical generator checks its live year bins at plan compile and window admission (section 4.4c). For the distribution generator, clip the first and last year on calendar bounds before constructing ns endpoints. Test 1677 and 2262 as well as out-of-domain bins with ordinary min/max. Explicitly convert to ns before integer arithmetic on every supported pandas version.
 
 Resolve the shift once with `transforms/date_shift.py:98 shift_window(cfg)`. It handles jitter, default bounds and reversed bounds. Resolve the bucket once with the existing bucket resolver. Keep the config resolver in date_shift.py and the bucket reach table in date_preserve.py. Store the resolved window or bucket on the domain and carry it into the partition. Reach comes from that resolved choice, so the refusal set is the same for every key (fixes E). With the usual windows the edge sentinels are refused on the typed path too: `9999-12-31` under `max_days > 0` or any bucket, `0001-01-01` under `min_days < 0` or any bucket. Genuine historic typed dates (`1600-01-01`) keep computing, as COLUMN-SHAPE E1b intended (`test_date_shift_typed_edges.py:74`). This is owner decision Q1.
 
@@ -164,11 +249,11 @@ At admission pass only ordinary stats to the existing range checks, including wi
 
 **S5 source reads.** Check Arrow data when it enters the reader, before it can reach pandas, Python scalar conversion or a native kernel. Use one checked table or batch operation in the io tier. Bind the table name when opening the source: it is the caller's `sources` mapping key, or the configured table on the single-source chunked entries (section 4.4b). In profile/_readers.py cover LazySource.iter_batches, open_batches and to_table, plus resident frames. At execution entry wrap supplied tables and loader results before transforms, preflight or dispatch, including direct chunked and native APIs. Apply it to resident inputs (including loader returns), lazy materialization and every yielded batch, including opened row-group reads and the direct OOC entry. The profile head uses the same checked read. Keep streaming bounded. A head scan proves nothing about unread rows. Later source conversions, all through main's `arrow_to_frame` / `arrow_to_series` since #799 (for example `execution/_chunked_profile.py:43`, `execution/pipeline/_source_types.py:64`, `execution/out_of_core/_mask_group_c.py:531`), must all receive checked data.
 
-For date32, date64 and timestamps, apply the holdable rule of section 4.4b in one pure check, `check_source_dates`, which returns its input unchanged or raises. Only plain date and timestamp columns and top-level dictionaries of them are read; every other column that holds a date at any depth is refused by type (Q6 = A). Section 4.4b defines admission for the zone, dictionary structure, and every plain cell or dictionary entry. Section 15 gives the Q8-B route contract if the owner selects it. The rule covers the `ns` unit (the storage range less `INT64_MIN`) and the local wall time of zoned columns, computed in Python integers with the tzinfo pyarrow hands pandas (`pyarrow.lib.string_to_tzinfo`) for the few cells near a bound. Raise `SourceDateUnrepresentableError` outside any exception handler with table and column names in text and the logical row count on the exception object. S5 changes no data, no pandas conversion and no read: whole-file reads stay main's `read_table` and are checked after the read. The AT-V1 source-boundary guard traces resident returns, caller loaders and lazy yields to the checked read, with allowances per function, never per file, and it treats a function that forwards data to an allowlisted conversion helper as a sink. A second rule allows the source-date errors to be raised only in `io/source_dates.py`. Bypassing a later batch or a resident return must fail AT-V1. Run the import-layer and reason-adapter tests, including isolated classification.
+For date32, date64 and timestamps, apply the rule of section 4.4b in one pure check, `check_source_dates`, which returns its input unchanged or raises. Every column that holds a date inside a container is refused by type (Q6 = A). A date column that a date strategy reads must be a plain `date32`, `date64` or `timestamp` column. A date dictionary, a stale pandas metadata type or a `date64` time of day on such a column is refused by type with a fix sentence (Q9 = A, section 0). The same encodings on a column no date strategy reads are left to main. Every plain date cell is judged by one holdable rule on every route, passthrough included (Q8 = A). The rule covers the `ns` unit (the storage range less `INT64_MIN`) and the local wall time of zoned columns, computed in Python integers with the tzinfo pyarrow hands pandas (`pyarrow.lib.string_to_tzinfo`) for the few cells near a bound. Raise `SourceDateUnrepresentableError` outside any exception handler with table and column names in text and the logical row count on the exception object. S5 changes no data, no pandas conversion and no read: whole-file reads stay main's `read_table` and are checked after the read. The AT-V1 source-boundary guard traces resident returns, caller loaders and lazy yields to the checked read, with allowances per function, never per file, and it treats a function that forwards data to an allowlisted conversion helper as a sink. A second rule allows the source-date errors to be raised only in `io/source_dates.py`. Bypassing a later batch or a resident return must fail AT-V1. Run the import-layer and reason-adapter tests, including isolated classification.
 
 ### 4.4a Existing tests the S5 source check changes
 
-This section specifies the proposed Q8-A test edits. For Q8-B use the route-specific expectations in section 15.
+This section specifies the test edits for the decided Q8 = A and for Q9 = A.
 
 Found by the S5 full suite on 2026-11-27 (236 new failures, all one class). The source check in 4.4 applies to every
 source column on every route, including passthrough and carried columns. So a source date outside the Python
@@ -226,9 +311,10 @@ timestamp tests above and the following tests added on the S5 branch:
 - `test_a_nested_date_inside_the_calendar_and_a_null_parent_pass` in the same file: inverted. Both columns are now
   refused by type. This is the contract change behind Q6, not a weakened test.
 - `test_an_unused_bad_dictionary_entry_is_dropped_not_refused`, `test_a_chunked_dictionary_column_is_cleaned_chunk_by_chunk`
-  and `test_a_record_batch_is_cleaned_too`: inverted in revision 5. An unused non-holdable entry now refuses the
-  column with `count == 0`, in every chunk layout. Rename them to `test_an_unused_bad_dictionary_entry_is_refused`,
-  `test_a_bad_entry_in_any_chunk_dictionary_is_refused` and `test_a_record_batch_is_checked_too`.
+  and `test_a_record_batch_is_cleaned_too`: under Q9 = A the check never judges dictionary entries. Rewrite each as two
+  cases: with the column in `date_read`, the column is refused by type with kind `dictionary` in every chunk layout;
+  with an empty `date_read`, `result is data`. Rename them to `test_a_read_date_dictionary_is_refused_by_kind`,
+  `test_an_unread_date_dictionary_is_left_to_main` and `test_a_record_batch_is_checked_too`.
   `test_a_dictionary_of_something_else_is_left_alone` (no date inside) stays as it is.
 - `tests/unit/execution/test_source_date_unrepresentable.py::test_a_far_date_nested_in_a_list_or_struct_is_refused_on_both_chunked_routes`:
   expects `source_date_type_unsupported`. Every `LazySource(path, table=TABLE)` fixture in that file (lines 84, 137,
@@ -238,565 +324,338 @@ timestamp tests above and the following tests added on the S5 branch:
 
 For branch tests, record the specific 4.4b type, cell or dictionary rule that changes the expected result.
 
-### 4.4b S5 redesign: one pure checked read (revisions 5 to 9)
+### 4.4b S5a design (Q9 = A, Q8 = A, Q7 = A)
 
-Revision 5 replaced the revision 4 text of this section (plan commit `780b3f26d`, kept in git history). It followed the
-S5 build (PR #839, branch `feat/date-range-s5`, head `a5da43ef9`), which failed six code-review rounds. Revision 6
-fixes Dennis plan review round 1 (section 17.3). Its main changes:
-- the zone test now uses the tzinfo that pandas and Python actually get;
-- the plan is re-anchored to `origin/main` `d1d7453ac`, which includes #799;
-- the comparison with main is corrected;
-- the null dictionary entry is now decided.
+Revision 10 rewrites this section for Option A of section 0, with the owner's Q7 = A and Q8 = A. The revision 9 text, which also covered the dictionary and metadata parity that Option A removes, is in git at `c19c945c9` (Appendix B.4). The round-by-round history is in Appendix B.
 
-**Main after #799.** `7822182c5` (#799, "route source reads through one conversion that fails coded") merged after the
-S5 branch was cut from `9812da814`. `a5da43ef9` does not contain it. On `d1d7453ac`:
-- every source conversion goes through `arrow_to_frame`, `arrow_to_series`, `arrow_to_frame_pair` or
-  `table_to_pandas_exact_ints` in `internal/pandas_compat.py`. The public module `decoy_engine.arrow_frames` exports
-  the three `arrow_to_*` names. The exact-integer helper is internal. Only the implementation module calls `to_pandas`;
-- a column pandas cannot hold raises the coded, value-free `runtime/source_column_unrepresentable` (or
-  `full_frame_value_unrepresentable` on the pandas execution routes), built in `_execution_error.py:52-75`.
+**Main after #799.** `7822182c5` (#799, "route source reads through one conversion that fails coded") merged after the S5 branch was cut from `9812da814`. `a5da43ef9` does not contain it. On `395c1c662`:
+- every source conversion goes through `arrow_to_frame`, `arrow_to_series`, `arrow_to_frame_pair` or `table_to_pandas_exact_ints` in `internal/pandas_compat.py`. The public module `decoy_engine.arrow_frames` exports the three `arrow_to_*` names. The exact-integer helper is internal. Only the implementation module calls `to_pandas`;
+- a column pandas cannot hold raises the coded, value-free `runtime/source_column_unrepresentable` (or `full_frame_value_unrepresentable` on the pandas execution routes), built in `_execution_error.py:52-75`.
 
-S5a builds on that boundary. It does not replace it, and it adds no conversion of its own. Source anchors and the original conversion probes in this section use `d1d7453ac`. Revision 7 uses
-`395c1c662` for the port and the public compatibility contract.
+S5a builds on that boundary. It does not replace it, and it adds no conversion of its own.
 
-**What went wrong.** Codex rounds 3 to 6 (`~/scratch/codex-s5-r3.out` to `r6.out`) found 22 V1 findings. Each round
-closed the named cases and the next round found the same class on another layout, zone or route. The findings come from
-three things S5 added on top of the date check, plus two gaps in the check itself:
+**S5 refuses; it never rewrites.** The S5 build (PR #839, `a5da43ef9`) failed six code-review rounds because it rewrote data and conversions that main already did (Appendix B.3). The checked read is a pure predicate over Arrow data. It returns its input object unchanged or raises. S5 adds no data repair, no pandas conversion code and no new read.
 
-| Source of the finding | Findings | What it was |
-|---|---|---|
-| Dictionary repair and a pandas working copy of date dictionaries (`io/source_dates.py` repair, `internal/pandas_compat.py` working categorical, `WorkingInstant`, index and label restoration) | R3: stored index lost, zero-chunk and `INT64_MIN` dictionaries, reports bypass the copy. R4: pandas 1.5.3 import, `INT64_MIN` instant changed, physical and display index names. R5: passthrough assembly fails and quotes a value, mask identity depends on an unused entry, projected MultiIndex, non-string labels, resident fallback index. R6: per-chunk compaction reorders categories, route disagreement (a second check site in the conversion). 14 in all | S5 rewrote data and the pandas conversion that main already did. Every layout the rewrite handled differently from `to_pandas` was a new finding |
-| A rewritten whole-file Parquet read (`fileaccess/adapters/arrow.py` dataset scanner, to gate before decode) | R3: decode before the gate. R4: directory fallback, dotted projection. R5: Hive partition key missing. R6: Hive key type. 5 in all | S5 replaced main's `pq.read_table` with a scanner whose semantics differ |
-| The check itself | R3: `local_timestamp` refuses fixed offsets on pyarrow 14. R6: zoned values near the nanosecond bounds pass the check and fail on scalar access | the rule had no statement for the nanosecond unit, and it used an Arrow kernel whose behavior varies by version |
-| Pre-existing, surfaced by S5 | R6: the output assembler mixes display labels with physical field names | reproduces on main with ordinary integer data |
+#### The rule
 
-The repeated class is "S5 rewrites something main already does, and the rewrite differs on a layout no test named".
-The redesign ends it by construction: **S5 refuses; it never rewrites.** The checked read is a pure predicate over Arrow
-data. It returns its input object unchanged or raises. S5 adds no data repair, no pandas conversion code and no new
-read. Every admitted input retains its original representation.
+`check_source_dates(data, *, table, date_read=frozenset())` in `io/source_dates.py` is the one place where the source date domain is judged. It judges one table or record batch, with its schema and pandas metadata. `date_read` is the set of physical field names that a date strategy reads in this table (section 0). The entry wrappers compute it once per table from the run's config with `date_strategy_columns(config, table)`, a new helper in `execution/_source_date_use.py`. It reads one constant, `DATE_STRATEGIES = frozenset({"date_shift", "bucket_perturb"})`, plus the `windowed_date` anchor columns. The `io` tier never reads config. Profile readers and runs without a config pass the empty set. S1 adds a sentry assertion that the strategies which build a `DateDomain` equal `DATE_STRATEGIES`.
 
-#### The rule: one checked read, one predicate
+Main's `arrow_to_frame` still refuses, coded, any column pandas cannot hold when a route converts. That guard stays. AT-V20 proves that the two never disagree on an admitted column.
 
-`check_source_dates(data, *, table, use=...)` in `io/source_dates.py` is the one place where the source date domain is judged.
-It judges one table or batch at a time. Under Q8-A isolation also calls it on the original dictionary columns before staging. The following uniform rule and matrix specify Q8-A. Section 15 specifies the substitutions for Q8-B. Main's `arrow_to_frame` still
-refuses, coded, any column pandas cannot hold when a route converts. That is main's guard and it stays. AT-V20 proves
-that the two never disagree on a date column: every date column S5 admits converts and reads.
+1. **Type gate (Q6 = A, unchanged).** A column that holds a date inside a list, large list, fixed-size list, map, struct, list view, run-end-encoded, union, extension or dictionary-of-container type is refused by type with `runtime/source_date_type_unsupported` and its outermost kind, whatever its dates are and whether or not a strategy reads it. The walker, the shape classifier and the unclassified-layout refusal from the S5 branch stay (`_arrow_types.py`). A top-level dictionary of a plain date type is not a container. Rule 2 decides it.
+2. **Exotic encodings (Q9 = A).** Find exotic fields from the schema (rules 3 and 4), then:
+   - a field in `date_read` that is a dictionary of a plain date type is refused, kind `dictionary`;
+   - a field in `date_read` with a metadata mismatch (rule 3) is refused, kind `pandas_metadata`;
+   - a `date64` field in `date_read` with a time of day (rule 4) is refused, kind `date64_time_of_day`;
+   - a dictionary or metadata-mismatch field not in `date_read` is skipped. S5 judges neither its type nor its cells, so main's conversion, carry and #799 refusal apply unchanged.
 
-1. **Type gate (Q6 = A, unchanged from revision 4).** A column is read only in one of these cases:
-   - it holds no date at any depth;
-   - it is a plain `date32`, `date64` or `timestamp` column;
-   - it is a top-level dictionary of one of those types.
+   The order is rule 1, then `dictionary`, then `pandas_metadata`, then `date64_time_of_day`, then cells. The first failing field in schema order decides.
+3. **Metadata mismatch (schema only).** Read `schema.pandas_metadata` once. When it is absent, no field has a mismatch. For each `columns` entry, find the field by its `field_name`, the key pyarrow uses (stored index fields included). Only fields in the checked schema count, so a projection that leaves out a field leaves out its entry. A field has a mismatch when its physical type is a date or timestamp, or its entry names a date or timestamp dtype, and one of these holds:
+   - (a) `pandas_type == "datetimetz"`, the physical type is a timestamp, and `metadata.timezone` is set and differs from the physical zone (a naive physical type included). pyarrow then rebuilds the field as `timestamp("ns", tz=metadata_tz)`;
+   - (b) `numpy_type` ends in `[pyarrow]` and is not exactly `f"{field.type}[pyarrow]"`. pyarrow then restores the `ArrowDtype` it names, also over a non-date physical field such as `int64`;
+   - (c) `numpy_type` is a zoned pandas spelling `datetime64[<unit>, <zone>]` and is not that spelling of the physical type.
 
-   Any other column that holds a date is refused by its type with `runtime/source_date_type_unsupported`, whether or not
-   its dates are in range. The walker, the shape classifier and the unclassified-layout refusal from the S5 branch stay
-   (`_arrow_types.py`).
-2. **Holdable cells.** Every non-null date cell of an admitted column must be *holdable*. Holdable means all of these:
+   A `numpy_type` unit that differs from the physical unit (`datetime64[ns]` over `timestamp[us, tz]`) is not a mismatch. Probes on 2026-11-28 showed it never changes the effective type. The fact is one pure function, `pandas_effective_type_mismatches(schema) -> frozenset[str]`, beside `stored_index_fields` in `_pandas_meta/_columns.py:28`, exported from the package. It imports no pandas. The builder checks (c) on the pinned stack with one literal probe. If pyarrow does not restore through (c), the rule keeps it anyway, because no known writer produces it and refusing it costs nothing.
+4. **date64 time of day.** A non-null physical `date64` value `v` has a time of day when `v % 86_400_000 != 0`. Scan every value in bounded windows, not only the extrema. A field in `date_read` with any such value is refused (rule 2). For a field not in `date_read`, rule 5 judges the cell's whole day, `v // 86_400_000`, because that is the date main's conversion reads.
+5. **Holdable cells (Q8 = A: every route).** Every non-null cell of a plain date column that rule 2 did not skip must be *holdable*:
    - its instant is a day in calendar years 1 to 9999 (the 4.4a domain, Q1);
    - for `ns`, its instant is not `INT64_MIN`, which pandas reads as `NaT`;
    - for a zoned timestamp, pandas can read the cell and Python can turn it into a `datetime` in its zone.
 
-   The predicate receives the original schema, physical values and the existing consumer's column use. Carry that context through projections by physical field, including stored index fields. For #799 reads pass the actual helper's metadata mode (frame default `ignore_metadata=False`, explicit overrides as supplied, array-to-series has no table metadata). Leave every conversion argument, callback and projection as on main.
-
-   Put the read-side schema fact beside `stored_index_fields` in `_pandas_meta/_columns.py:28` and export it from the package. Read `schema.pandas_metadata` once for timestamp fields that need restoration. Match a `datetimetz` descriptor to its physical timestamp field using Arrow's field-name and legacy index-name conventions. When restoration overrides the physical zone, pyarrow 24 rebuilds that field at ns resolution. Check the UTC tick in that unit with exact integer scaling and its local time in the restored zone. When the route ignores metadata, its read uses the physical unit and zone. Under A check both physical and restorable interpretations even on a carry. Under B check the interpretation at each actual use, including any first-table dtype lookup. Call the same bounds and resolver logic for each required interpretation. No trial conversion in production.
-
    | Type | A non-null cell with physical integer `v` is holdable when |
    |---|---|
    | `date32` | `CALENDAR_FIRST_DAY_NUMBER <= v <= CALENDAR_LAST_DAY_NUMBER` |
-   | `date64` | `v % 86_400_000 == 0` and its UTC day lies in that range |
+   | `date64` | its day `v // 86_400_000` lies in that range |
    | `timestamp(unit)`, no zone | `lo <= v <= hi` |
    | `timestamp(unit, zone)` | `lo <= v <= hi`, the zone resolves, and `lo <= v + offset(zone, v) <= hi` with the local time inside years 1 to 9999 |
 
-   `[lo, hi]` is the span from the first tick of year 1 to the last tick of year 9999 in the unit's ticks, intersected
-   with `[INT64_MIN + 1, INT64_MAX]`. For `s`, `ms` and `us` the calendar lies inside the storage range, so `[lo, hi]`
-   is the calendar. For `ns` the storage range is the narrower one, so `[lo, hi]` is 1677-09-21 00:12:43.145224193 to
-   2262-04-11 23:47:16.854775807 UTC. `offset(zone, v)` is the UTC offset at instant `v` of the tzinfo that pyarrow
-   gives pandas and Python for that zone. The section "How the zone test is computed" explains how it is found.
-3. **Dictionary structure.** Inspect the index type even on a zero-row column. Accept signed integer widths 8 to 64 and unsigned widths 8 to 32 on the pinned stack. Refuse `uint64`. In each original chunk, require distinct categories, including unused ones. Require day alignment on every non-null date64 physical value, including unused entries, before comparing days. This source-format requirement applies under either Q8 answer. Separate dictionaries can then share a day only with the same physical encoding. For timestamps compare ticks in the declared unit. An entry repeated in two different dictionaries is ordinary. Inspect every entry for null and holdability, even in a zero-row chunk. A null index is a missing row and is allowed. The remedy for an invalid dictionary is to decode or re-encode it with valid entries and indices.
-4. **Refusal and count.** An unresolved zone, an invalid dictionary structure or a failed cell test raises `runtime/source_date_unrepresentable`. Keep the separate Q6 container error and its kind. The date error names only the mapping key and column in the variable part of its text. Raise outside the handler. Count logical rows of this column in this checked input. Count a non-null plain value outside the domain or in an unresolved zone, and a dictionary index that points to a null or unholdable entry. Each row counts at most once. Missing rows add zero. Duplicate categories and index width cause refusal independently of the count and add no bad rows of their own. Thus a purely structural failure, an unused bad entry, and an empty or all-null unresolved-zone column each refuse with `count == 0`. If a structural fault coexists with referenced bad entries, still report their row count. Keep the count on the typed error only.
-5. **Purity and cost.** When the data passes, `check_source_dates` returns the same object it was given
-   (`result is data`). On the pass path use zero-copy integer views for plain cells. Extrema suffice for the UTC range. Check day alignment on every physical date64 tick in bounded windows, including interior values between aligned extrema. For a
-   dictionary it checks entries without decoding rows or building a row mask. Once an entry fails, the refusal counter gathers bad-entry flags in bounded index windows and sums the true rows. A block-local `pc.take` may gather flags only for indices belonging to the current entry window. Keep temporary flags bounded for large dictionaries too. A null index adds
-   zero. A row pointing to a null entry adds one. The whole-file in-memory read (`LazySource.to_table`, "small jobs only",
-   `profile/_readers.py:417`) is main's existing read. The out-of-core routes use the batch path. AT-V15 checks the
-   allocation.
+   `[lo, hi]` is the span from the first tick of year 1 to the last tick of year 9999 in the unit's ticks, intersected with `[INT64_MIN + 1, INT64_MAX]`. For `s`, `ms` and `us` the calendar lies inside the storage range, so `[lo, hi]` is the calendar. For `ns` the storage range is the narrower one, so `[lo, hi]` is 1677-09-21 00:12:43.145224193 to 2262-04-11 23:47:16.854775807 UTC. `offset(zone, v)` is the UTC offset at instant `v` of the tzinfo that pyarrow gives pandas and Python for that zone ("How the zone test is computed" below). Because rule 2 skips or refuses every metadata-mismatch field, each judged field's effective type is its physical type, and the rule needs one interpretation only. Q7 = A: pandas 2.x keeps the source unit, so no pandas 1.x bounds exist.
+6. **Refusal, count and text.** A failed cell test or an unresolved zone raises `SourceDateUnrepresentableError` (`runtime/source_date_unrepresentable`). The count is the number of logical rows of this column in this checked input with a non-null value that fails, or with a non-null value in an unresolved zone. Missing rows add zero. An empty or all-null column in an unresolved zone refuses with `count == 0`. The count is kept on the typed error only. A rule 1 or rule 2 refusal raises `SourceDateTypeUnsupportedError` with table, column and kind, and no count. Raise outside any handler. The variable part of every text is the mapping key and column only. The fix sentences are fixed strings:
 
-**Reason decision (revision 6, M2).** S5a keeps its own code, `runtime/source_date_unrepresentable`, beside #799's
-`runtime/source_column_unrepresentable`. It does not reuse #799's code, for three reasons:
-- The set of values is different. S5 refuses dates that pandas can hold, under the decided calendar domain (for example
-  a `timestamp[us]` entry in year 10000, or fixture F4). It also refuses on routes that never convert (NCH).
-  `source_column_unrepresentable` says "a value pandas cannot represent", which would be false for those inputs.
-- The remedy is different. The remedy is to fix or null the date, cast the column to text, or decode or re-encode a
-  dictionary. A date outside this domain cannot be declared as a sentinel.
-- It carries a row count.
+   | Kind | Fix sentence in the message |
+   |---|---|
+   | `dictionary` | "A date strategy reads this column, and it is dictionary-encoded. Cast it to a plain date or timestamp column." |
+   | `pandas_metadata` | "A date strategy reads this column, and its pandas metadata names another type. Cast it to a plain date or timestamp column and write the metadata again." |
+   | `date64_time_of_day` | "A date strategy reads this column, and it holds a time of day. Cast it to a plain date32 or timestamp column." |
+   | container kinds (Q6) | the revision 4 text, unchanged |
 
-The location wording is shared, not copied: move the table and column phrase of `_unrepresentable_text`
-(`_execution_error.py:41-46`) into a helper `source_location_text(table, column)` in the same leaf module. Both error
-families build their message from it. `io` sits above the `_execution_error` tier (`tests/sentry/layout/test_import_layers.py`
-`LAYERS`), so the import is allowed. Registry summary: "The source date column has an unsupported date, time zone or dictionary." Describe years 1 to 9999, the ns limits in UTC and local time, unknown zones, duplicate or null categories and unsupported index widths in the remediation. The remediation text adds the dictionary remedy above. Both codes are
-`since=UNRELEASED`, so the text can still change without a deprecation.
+7. **Purity and cost.** When the data passes, `check_source_dates` returns the same object it was given (`result is data`). Use zero-copy integer views. Extrema decide the UTC range. Scan `date64` alignment and band cells in bounded windows. The schema rules allocate nothing per row. The check never decodes a dictionary and never converts to pandas. The whole-file in-memory read (`LazySource.to_table`, "small jobs only", `profile/_readers.py:417`) is main's existing read. AT-V15 checks the allocation.
 
-**How the zone test is computed (revision 6, H1).** pandas 2 does not use `zoneinfo`. `to_pandas` gets its tzinfo
-from pyarrow's resolver, `pyarrow.lib.string_to_tzinfo(zone)`, which returns a `pytz` zone when `pytz` is installed.
-pandas 2 requires `pytz`, so in every supported environment the zone is a `pytz` zone. `as_py` uses the same
-resolver. `pytz` differs from `zoneinfo` in three ways that matter at the bounds:
-- It keeps the last rule after its 2037 transition table. Australia/Sydney is +11:00 and Pacific/Auckland is +13:00 at
-  2262-04-11 (zoneinfo: +10:00 and +12:00). Europe/Berlin goes the other way: +1:00 (zoneinfo: +2:00).
+**Reason decision.** S5a keeps its own code, `runtime/source_date_unrepresentable`, beside #799's `runtime/source_column_unrepresentable`:
+- the set of values is different: S5 refuses dates that pandas can hold, under the decided calendar domain (for example a `timestamp[us]` cell in year 10000, or fixture F4), and on routes that never convert (NCH carry);
+- the remedy is different: fix or null the date, or cast the column to text. A date outside this domain cannot be declared as a sentinel;
+- it carries a row count.
+
+Move the table and column phrase of `_unrepresentable_text` (`_execution_error.py:41-46`) into `source_location_text(table, column)` in the same leaf module. Both error families build their message from it. `io` sits above the `_execution_error` tier (`tests/sentry/layout/test_import_layers.py` `LAYERS`), so the import is allowed. Registry summaries: `source_date_unrepresentable` "The source date column holds a date outside years 1 to 9999, outside the nanosecond range, or in an unknown time zone"; `source_date_type_unsupported` "The source column holds dates in a type or encoding the engine does not read". The remediation names each kind's fix from rule 6. Both codes are `since=UNRELEASED`, so the text can still change without a deprecation.
+
+**How the zone test is computed (revision 6, H1).** pandas 2 does not use `zoneinfo`. `to_pandas` gets its tzinfo from pyarrow's resolver, `pyarrow.lib.string_to_tzinfo(zone)`, which returns a `pytz` zone when `pytz` is installed. pandas 2 requires `pytz`, so in every supported environment the zone is a `pytz` zone. `as_py` uses the same resolver. `pytz` differs from `zoneinfo` in three ways that matter at the bounds:
+- It keeps the last rule after its 2037 transition table. Australia/Sydney is +11:00 and Pacific/Auckland is +13:00 at 2262-04-11 (zoneinfo: +10:00 and +12:00). Europe/Berlin goes the other way: +1:00 (zoneinfo: +2:00).
 - It rounds local mean time offsets to whole minutes: New York is -4:56, not -4:56:02.
 - It does not know some zones that `zoneinfo` knows, for example `Factory`.
 
-Revision 5 modelled offsets with `zoneinfo`. For Sydney at `INT64_MAX - 10h` its model admits a cell that main's
-own `arrow_to_frame` converts and then fails to read (`OutOfBoundsDatetime` quoting a timestamp). So the zone test
-uses the resolver that the converter uses:
+So the zone test uses the resolver that the converter uses:
 
-- Resolve the zone once per zoned column with `pyarrow.lib.string_to_tzinfo`, whether or not the column has band
-  cells, including for dictionary value types, empty columns and all-null columns. Resolution is a type-level requirement. A missing zone definition sets the refusal even when the row count is zero. Use rule 4 for the count. On a reader that yields no batches, check the projected typed empty table before returning an empty result. Catch only `KeyError` and `pa.ArrowInvalid`
-  from the resolver. `KeyError` covers both
-  pytz's unknown-zone error and zoneinfo's missing-key error. Keep pytz imports out of `io`. AT-V12 pins the refusal.
-  When testing pandas 3 without pytz, check malformed zone keys for `ValueError` before extending this catch.
-- Let `M` be two days in the unit's ticks. The largest named-zone offset measured was 15:56:08 (Asia/Manila).
-  The resolver also accepts fixed offsets through ±23:59. Both fit within the margin.
-  A cell with `lo + M <= v <= hi - M` is holdable in every resolved zone, and a
-  cell outside `[lo, hi]` is not. Integer comparisons on the whole array decide both (the existing extrema
-  prefilter).
-- For *band* cells (within `M` of `lo` or `hi` in a zoned column), take the distinct band values (`pc.unique`). Build
-  each one's UTC `datetime` from whole seconds, since offsets change on whole seconds. Convert it with
-  `astimezone(tzinfo)` and add the offset back to `v` in integers. An `OverflowError` means the local wall time leaves
-  years 1 to 9999: not holdable.
-- Track refusal independently of the count. The helper returns a boolean and catches only the listed errors. The refusal is raised later, outside it.
-- `pc.local_timestamp` and `_fixed_offset_seconds` are not used. The resolver handles fixed offsets (`+05:30`,
-  `-08:00`) as well, so one path covers every zone and the pyarrow 14 fixed-offset failure (R3) cannot recur.
+- Resolve the zone once per judged zoned column with `pyarrow.lib.string_to_tzinfo`, whether or not the column has band cells, including empty and all-null columns. Resolution is a type-level requirement. A missing zone definition sets the refusal even when the row count is zero. On a reader that yields no batches, check the projected typed empty table before returning an empty result. Catch only `KeyError` and `pa.ArrowInvalid` from the resolver. `KeyError` covers both pytz's unknown-zone error and zoneinfo's missing-key error. Keep pytz imports out of `io`. AT-V12 pins the refusal.
+- Let `M` be two days in the unit's ticks. The largest named-zone offset measured was 15:56:08 (Asia/Manila). The resolver also accepts fixed offsets through plus or minus 23:59. Both fit within the margin. A cell with `lo + M <= v <= hi - M` is holdable in every resolved zone, and a cell outside `[lo, hi]` is not. Integer comparisons on the whole array decide both.
+- For *band* cells (within `M` of `lo` or `hi` in a zoned column), take the distinct band values (`pc.unique`). Build each one's UTC `datetime` from whole seconds, since offsets change on whole seconds. Convert it with `astimezone(tzinfo)` and add the offset back to `v` in integers. An `OverflowError` means the local wall time leaves years 1 to 9999: not holdable.
+- The helper returns a boolean and catches only the listed errors. The refusal is raised later, outside it.
+- `pc.local_timestamp` and `_fixed_offset_seconds` are not used. The resolver handles fixed offsets (`+05:30`, `-08:00`) as well, so one path covers every zone and the pyarrow 14 fixed-offset failure (R3) cannot recur.
 
-This uses pyarrow's resolver and not a trial conversion, because the check sits in `io`, a tier below `internal`. It
-cannot import the conversion module, and main's rule keeps `to_pandas` inside `internal/pandas_compat.py`. A trial
-conversion would either break the layering or add a second conversion site, which is the class that failed review.
-The resolver is the same object the converter receives, so it is not a separate model.
-
-A library probe on main's venv (pyarrow 24.0.0, pandas 2.3.3, pytz 2026.2, 2026-11-28) compared the resolver test with
-real conversion plus scalar access (`to_pandas`, `iloc[0]`, `as_py`):
-- sample: 14,448 band values over 599 zones and three fixed offsets, in units `s`, `us` and `ns`, at both bounds;
-- result: 0 disagreements;
-- the four reviewed cases also match: Sydney and Auckland at the `ns` top are refused, Berlin `INT64_MAX - 3601 s` is
-  read, and New York `INT64_MIN + 42` is refused.
-
-AT-V13's oracle is the real conversion, not the resolver (see the tests below). So a pandas or pyarrow change that
-breaks this agreement turns the test red.
-
-pandas 3 drops `pytz` and resolves zone strings with `zoneinfo`. If pyarrow then hands pandas a `zoneinfo` object, the
-resolver follows, because the check asks pyarrow and not a fixed library. AT-V13 and AT-V20 are the guard. Any
-pandas or pyarrow pin bump, and the DEP-FLOOR legs, run them.
-
-**Why this rule (options considered).** The brief asked for the simplest rule that satisfies Q6 = A and that can be
-tested exhaustively.
-
-| Option | What it does | Verdict |
-|---|---|---|
-| A. Check the index type, category uniqueness and every entry, used or unused (proposed under Q8-A) | One predicate for plain cells and dictionary entries; the read never changes data | Chosen. See below |
-| B. Decode every date dictionary to a plain column at the read, then test cells | One cell rule, but the read returns new data | Rejected: changes the output type of every valid date dictionary from `dictionary<date32>` to `date32`, loses ordered-categorical sorting, and still needs the holdable test for the decoded cells. The check would again return data callers must use |
-| C. Test only referenced entries, then repair the dictionary (the S5 branch) | Drops unused bad entries, remaps codes, builds a pandas working copy | Rejected: this is the design that failed rounds 3 to 6 |
-| D. Refuse every date dictionary | No dictionary rule at all | Rejected: refuses in-range dictionaries that main converts correctly, and narrows the shapes Q6 = A admits, which is an owner call |
-
-**What rule A changes against main (corrected in revision 6, M1).** Revision 5 said that rule A refuses only inputs
-that already fail on main. That was measured against raw `to_pandas`, not against main's `arrow_to_frame`, and it is
-false as written. The probe below ran main's own `arrow_to_frame` from a `git archive` of `d1d7453ac`, with the same
-library versions, 2026-11-28:
-
-| # | Input | Main `d1d7453ac` (convert, then read the rows) | S5a | Kind |
-|---|---|---|---|---|
-| 1 | `dictionary<date32>`, entries in years 1 to 9999 including `0001-01-01` and `9999-12-31`, used or unused | converts, rows read | read | same |
-| 2 | `dictionary<date32>`, unused entry in year 10183 | refused, `source_column_unrepresentable` | refused, `count == 0` | other code, earlier |
-| 3 | plain `date32`, year 10183 | refused, `source_column_unrepresentable` | refused, `count == 1` | other code, earlier |
-| 4 | `dictionary<timestamp[us]>`, `9999-12-31` used | converts, rows read | read | same |
-| 5 | `dictionary<timestamp[s\|ms\|us]>`, an entry before year 1 or after year 9999 | converts, rows read | refused | **narrowing** (calendar domain) |
-| 6 | `dictionary<timestamp[ns]>`, entry `INT64_MIN` | refused, `source_column_unrepresentable` | refused | other code, earlier |
-| 7 | `dictionary<timestamp[ns, America/New_York]>`, unused entry `INT64_MIN + 42` | converts, rows read (the entry is never read) | refused, `count == 0` | **narrowing** |
-| 8 | plain `timestamp[ns, America/New_York]` `INT64_MIN + 42`; `timestamp[ns, Asia/Kolkata]` `INT64_MAX`; `timestamp[ns, Australia/Sydney]` `INT64_MAX - 10h` | converts; reading the cell raises `OutOfBoundsDatetime` quoting a timestamp | refused | main defect on conversion (value in the message) |
-| 9 | plain `timestamp[ns]` or `timestamp[ns, UTC]`, `INT64_MIN` | converts to `NaT` without notice | refused | main defect on conversion (a value is lost) |
-| 10 | plain `timestamp[ns]`, `INT64_MAX` | converts, rows read | read | same |
-| 11 | plain `timestamp[us, Asia/Kolkata]`, `9999-12-31T23:00Z` (F4) | converts; pandas reads the cell (`10000-01-01 04:30+05:30`); only Python `as_py` fails | refused | **narrowing** (calendar domain) |
-| 12 | `dictionary<date32>` with a null entry | refused, `source_column_unrepresentable` | refused (G-13) | other code, earlier |
-| 13 | rows 2, 3, 5, 6, 7, 8, 9, 11 and 12 on NCH passthrough, also rows 8 and 9 on CH where it returns the original column | returned exactly | refused | **narrowing** |
-| 14 | plain timestamp in unknown zone `Factory`, populated, zero rows or all null | conversion raises uncoded `UnknownTimeZoneError('Factory')`. First-table NCH carried profiling also resolves the dtype and raises. A later table with a changed physical zone encounters schema drift | coded date refusal under A | first-table profile failure becomes coded; see route cases below |
-| 15 | date32 dictionary with entries [epoch, epoch] and indices [0, 1], or [epoch] with uint64 index [0] | pandas conversion fails on these one-chunk literals. Native carried passthrough preserves the Arrow dictionary | date refusal, count 0 | earlier coded error on conversion, **narrowing** on passthrough |
-
-On routes that convert these columns, S5a gives an earlier date code for rows 2, 3, 6 and 12. It prevents the scalar read failure
-in row 8, silent loss in row 9 and the uncoded resolver error in row 14. Row 15 covers dictionary structure. Some multi-chunk conversions on main unify duplicate categories and succeed. On the pinned stack pandas also reads an epoch category in a dictionary of `timestamp[ns, Factory]` as a naive timestamp. Include these converting successes in the Q8-A narrowing alongside the passthrough cases. Main can read rows 5, 7 and 11.
-On passthrough, rows 13 to 15 show which accepted inputs would now fail. Only the dictionary forms require
-caller-supplied Arrow. Include each narrowing in the changelog and section 4.7. Q8 remains open. The build assumes
-option A pending the owner's decision.
-
-Why A is otherwise sound:
-
-- *Counts cover one checked input.* Internal chunk boundaries in a table do not reset its count. Equivalent splits retain the original dictionary entries, index type and logical rows. Combining dictionaries can remove a duplicate or discard an empty dictionary, which changes the input to this rule. AT-V14 only compares equivalent representations. A streaming entry checks each batch independently and stops at its first refusal. Its count can differ from a whole-table count.
-- *The refusal reaches only caller-supplied Arrow* for dictionaries. A date dictionary reaches the engine only as
-  resident `sources`, a `source_loader` result or chunked API input, where the caller can decode or re-encode the
-  column. The refusal text says so.
-- *Q6 = A holds.* The type gate and the admitted shapes are those of revision 4. Rules 2 to 4 decide which values and dictionary structures those shapes can carry.
+This uses pyarrow's resolver and not a trial conversion, because the check sits in `io`, a tier below `internal`. A trial conversion would either break the layering or add a second conversion site, which is the class that failed review. A library probe on main's venv (pyarrow 24.0.0, pandas 2.3.3, pytz 2026.2, 2026-11-28) compared the resolver test with real conversion plus scalar access on 14,448 band values over 599 zones and three fixed offsets, in units `s`, `us` and `ns`, at both bounds: 0 disagreements. AT-V13's oracle is the real conversion, so a pandas or pyarrow change that breaks this agreement turns the test red. Any pandas or pyarrow pin bump, and the DEP-FLOOR legs, run AT-V13 and AT-V20.
 
 #### Where the check runs (choke point and guards)
 
-The rule is one function. Ingestion reaches it through the entry wrappers that the S5 branch already built and review
-already passed. Rounds 3 to 6 confirmed that SEQ, direct OOC, both chunked entries, `PandasExecutionAdapter.run` and
-`run_single`, cloud and ISO reach it. The wrappers are:
-- `check_resident_sources` and `checked_loader` at `run_pipeline`, `run_sequential`, `run_fk_out_of_core` and
-  `PandasExecutionAdapter.run`;
+The rule is one function. Ingestion reaches it through the entry wrappers that the S5 branch already built and review already passed. Rounds 3 to 6 confirmed that SEQ, direct OOC, both chunked entries, `PandasExecutionAdapter.run` and `run_single`, cloud and ISO reach it. The wrappers are:
+- `check_resident_sources` and `checked_loader` at `run_pipeline`, `run_sequential`, `run_fk_out_of_core` and `PandasExecutionAdapter.run`;
 - `checked_chunks` in `execution/_chunked_input.py` for both `run_mask_pipeline_chunked` and `run_mask_chunked`;
 - `checked_batches` for lazy Parquet batches;
-- the profile readers.
+- the profile readers, always with an empty `date_read`.
 
-**Isolation.** In both modes check the original resident schema by mapping key before IPC admission. Under Q8-A, before the writer calls `table.to_batches()`, pass a zero-copy projection of the original top-level date dictionaries to the same predicate, retaining every chunk and all indices. This catches trailing and wholly empty dictionaries and counts referenced failures across the original column. Under B run the common date64 alignment rule on the original dictionaries before staging. For pandas compatibility check the actual child read after IPC, where empty dictionary chunks may have disappeared. The converting ISO cases below pin that difference.
+Each run wrapper passes `date_strategy_columns(config, table)`. AT-V21 seeds a wrapper that passes the empty set on a run route and requires it to fail (M-73).
 
-Route a typed refusal through the existing reason adapter and safe failure formatter inside the publication cleanup scope in `execution/_isolated_run.py` (the call to `_write_payload`). Return a failed `IsolatedRunResult` with the registered reason, safe summary and no outputs. A pre-spawn failure has no child peak or PID. Keep unrelated staging error behavior. The child still applies its configured memory limit before it reads and checks staged data or runs any pipeline work.
-
-Keep plain-column scans, conversion and profiling in the child. Bound the shared dictionary check's scratch space on the staging path: scan entry and index windows. Do not decode the column or allocate a row-sized mask in the parent. For large dictionaries check uniqueness in bounded blocks, including across blocks of the same dictionary. Count referenced failures in bounded index windows. AT-V15 measures the parent's scratch separately. A successful isolation control must also spawn and run under the configured child cap.
+**Isolation.** In both modes the parent checks the original resident schema by mapping key before IPC admission: rule 1 and the `dictionary` and `pandas_metadata` kinds of rule 2. These are schema-only, so the parent allocates nothing per row, and a refused table never reaches the writer. The cell rules (rules 4 and 5) run in the child on the staged data. IPC keeps plain date and timestamp buffers exactly, so the child judges the same values as an in-process run. A skipped field stages as main stages it. Route a typed refusal through the existing reason adapter and safe failure formatter inside the publication cleanup scope in `execution/_isolated_run.py` (the call to `_write_payload`). Return a failed `IsolatedRunResult` with the registered reason, safe summary and no outputs. A pre-spawn failure has no child peak or PID. Keep unrelated staging error behavior. The child still applies its configured memory limit before it reads and checks staged data or runs any pipeline work.
 
 The builder re-derives each line anchor on main while porting (section "What the S5 branch keeps").
 
 Four guards hold it:
 
-- **The read sentry** (`tests/sentry/test_source_date_read_guard.py`, kept from the S5 branch, sink set rebuilt in
-  revision 6). Every function that hands Arrow source data to a conversion must be a checked entry or have a
-  per-function allowance with a reason.
-  - On main the conversion helpers (the sinks) are `arrow_to_frame`, `arrow_to_series`, `arrow_to_frame_pair` and
-    `table_to_pandas_exact_ints`. Resolve all four at their definition and follow aliases. For the three
-    `arrow_to_*` functions, also follow the public re-exports in `decoy_engine.arrow_frames` and the root package. This replaces the branch's
-    `{table_to_pandas, table_to_pandas_exact_ints, _pandas_categories}`.
-  - The census assertion becomes: every function in `internal/pandas_compat.py` that calls the exact attribute `to_pandas` is a sink, or a
-    private helper that only a sink calls. On main that is `arrow_to_frame`, `arrow_to_series` and
-    `_first_failing_column`, and only `arrow_to_frame` calls `_first_failing_column`. Exclude `arrow_dtype_label`, whose call is to `to_pandas_dtype`.
+- **The read sentry** (`tests/sentry/test_source_date_read_guard.py`, kept from the S5 branch, sink set rebuilt in revision 6). Every function that hands Arrow source data to a conversion must be a checked entry or have a per-function allowance with a reason.
+  - On main the conversion helpers (the sinks) are `arrow_to_frame`, `arrow_to_series`, `arrow_to_frame_pair` and `table_to_pandas_exact_ints`. Resolve all four at their definition and follow aliases. For the three `arrow_to_*` functions, also follow the public re-exports in `decoy_engine.arrow_frames` and the root package.
+  - The census assertion: every function in `internal/pandas_compat.py` that calls the exact attribute `to_pandas` is a sink, or a private helper that only a sink calls. On main that is `arrow_to_frame`, `arrow_to_series` and `_first_failing_column`, and only `arrow_to_frame` calls `_first_failing_column`. Exclude `arrow_dtype_label`, whose call is to `to_pandas_dtype`.
   - Keep the resolved direct-caller check (M-36) and the alias resolution from round 4.
-  - Remove the bare-statement rule (old M-29): the check returns its input, so a call whose result is dropped is
-    correct.
-  - **Round 6 DESIGN fix, kept and measured (revision 6, L1).** Name the bound as the module constant `_STOP_AT` and
-    use it in the size assertion. Register it in `tests/sentry/ratchet/_limit_constants.py` `LIMITS` as
-    `("test_source_date_read_guard.py", "_STOP_AT"): "max"`, and mirror it in
-    `tests/sentry/baselines/sentry-limits.json` with a reason.
-  - Its value is the measured length of `_DOWNSTREAM_FUNCTIONS` on the S5a head, after the sink set is rebuilt. It is
-    not 40: the 31 entries counted on the branch were never measured against post-#799 main. The builder report states
-    the measured count. If it is above 40 (the branch's stop), the builder stops and reports instead of pinning.
-- **One decision site** (new rule in the same sentry). Outside `io/source_dates.py`, no module under `src/decoy_engine`
-  constructs `SourceDateUnrepresentableError` or `SourceDateTypeUnsupportedError` (their definitions in
-  `io/bounded_reader.py` are the only other mention), and no module imports the holdable helpers. A second check in a
-  conversion helper (the R6 route disagreement) fails this rule. The walk parses the tree and resolves import aliases,
-  as the existing sentry does.
-- **No S5 conversion code** (revision 6, H2). The builder report checks added lines with this command:
+  - Remove the bare-statement rule (old M-29): the check returns its input, so a call whose result is dropped is correct.
+  - Name the bound as the module constant `_STOP_AT` and use it in the size assertion. Register it in `tests/sentry/ratchet/_limit_constants.py` `LIMITS` as `("test_source_date_read_guard.py", "_STOP_AT"): "max"`, and mirror it in `tests/sentry/baselines/sentry-limits.json` with a reason. Its value is the measured length of `_DOWNSTREAM_FUNCTIONS` on the S5a-1 head. The builder report states the measured count. If it is above 40 (the branch's stop), the builder stops and reports instead of pinning.
+- **One decision site.** Outside `io/source_dates.py`, no module under `src/decoy_engine` constructs `SourceDateUnrepresentableError` or `SourceDateTypeUnsupportedError` (their definitions in `io/bounded_reader.py` are the only other mention), and no module imports the holdable helpers. `date_strategy_columns` decides the use set only and never a refusal. The walk parses the tree and resolves import aliases, as the existing sentry does.
+- **No S5 conversion code.** The builder report checks added lines with this command:
   ```
   git diff origin/main -U0 -- src | grep '^+' | grep -E 'to_pandas|arrow_to_(frame|series)|table_to_pandas'
   ```
-  Explain every hit line by line. For a comment or docstring, identify the text. For an existing call moved or
-  re-indented, show the matching base call and its unchanged arguments and behavior. A new conversion fails the check.
-  - `internal/pandas_compat.py`, `execution/pipeline/_source_types.py`, `execution/_pipeline_finalize.py`,
-    `execution/pipeline/post_scan/`, `execution/chunked/_progress.py` and `safe_output/` stay byte-identical to
-    `origin/main`. The report shows `git diff origin/main --stat` for these paths, and it must be empty.
-  - In the files S5a does touch, every existing conversion call stays main's
-    `arrow_to_frame(..., on_unrepresentable=...)` call with its original arguments and behavior.
-- **Admission soundness** (AT-V20). Every date column the check admits converts through main's `arrow_to_frame`, and
-  every one of its cells, dictionary entries included, reads through `iloc` and `as_py`.
+  Explain every hit line by line. A new conversion fails the check. `internal/pandas_compat.py`, `execution/pipeline/_source_types.py`, `execution/_pipeline_finalize.py`, `execution/pipeline/post_scan/`, `execution/chunked/_progress.py`, `profile/arrow/_walk_arrow.py`, `execution/_pipeline_auto_chunk.py`, `execution/_chunked_output_sink.py` and `safe_output/` stay byte-identical to `origin/main`. The report shows `git diff origin/main --stat` for these paths, and it must be empty.
+- **Admission soundness** (AT-V20). Every date column the check judges and admits converts through main's `arrow_to_frame`, and every one of its cells reads through `iloc` and `as_py`.
 
 **Reads stay main's reads.** S5 does not change how a source is read.
-- Whole-file reads: `LazySource.to_table` (feeding `profile/_readers.py:417`) and the S3/GCS whole-object reads
-  (`profile/_cloud_readers.py:272` and `:394`, main's `pq.read_table` then `arrow_to_frame`). For these, insert
-  `check_source_dates` on the returned table before main's conversion, and change nothing else. The check gates the
-  table's schema and cells. Do not port `read_table_gated` or the `pyarrow.dataset` import.
-- A whole-file read decodes a refused column once before the refusal. That costs time only, on the in-memory route.
-- Batch reads keep the S5 branch's open-time gate on the projected schema (`projected_schema`, `_gate_open`; round 5
-  confirmed it), because a batch iterator uses `ParquetFile` semantics on both sides.
-- A file that Arrow itself cannot decode (a null parent in a `fixed_size_list<date32>`) fails with Arrow's error, as on
-  main (follow-up G-14).
+- Whole-file reads: `LazySource.to_table` (feeding `profile/_readers.py:417`) and the S3/GCS whole-object reads (`profile/_cloud_readers.py:272` and `:394`, main's `pq.read_table` then `arrow_to_frame`). Insert `check_source_dates` on the returned table before main's conversion, and change nothing else. Do not port `read_table_gated` or the `pyarrow.dataset` import.
+- Batch reads keep the S5 branch's open-time gate on the projected schema (`projected_schema`, `_gate_open`). The gate also applies rules 1 to 3 to the projected schema with the file's pandas metadata, so a refused column is refused before the first batch, also for a zero-row file.
+- A file that Arrow itself cannot decode (a null parent in a `fixed_size_list<date32>`) fails with Arrow's error, as on main (follow-up G-14).
 
-**Table name.** Unchanged from revision 4 and kept from the branch:
-- `check_resident_sources` rebinds a lazy source to its `sources` mapping key;
-- the single-source chunked entries use the configured table;
-- ISO carries the key through the manifest.
+**Table name.** Unchanged from revision 4 and kept from the branch: `check_resident_sources` rebinds a lazy source to its `sources` mapping key, the single-source chunked entries use the configured table, and ISO carries the key through the manifest.
 
 #### Behavior matrix
 
-The predicate uses the original schema, physical values and the use specified in rules 2 and 3. Routes only
-have to reach it. So the matrix is tested in two layers: the rule is tested exhaustively at the function, and each route
-is tested to reach the same function and report its answer unchanged.
+The rule is tested exhaustively at the function, and each route is tested to reach the same function with the right `date_read` and report its answer unchanged.
 
 Axes:
-
-- Routes:
-  - FF and AUTO (`run_pipeline`);
-  - SEQ (`run_pipeline` sequential and direct `run_sequential`);
-  - OOC (`run_pipeline` out_of_core and `run_fk_out_of_core`, Python and native backend);
-  - CH (`run_mask_pipeline_chunked`);
-  - NCH (`run_mask_chunked`);
-  - PAN (`PandasExecutionAdapter.run` and `run_single`);
-  - ISO (isolation on and off);
-  - CLOUD (S3/GCS whole-object and range readers, in-memory fetch);
-  - HIVE (a whole read of the partitioned directory, and a separate batch reader opened on the partition file);
-  - PROF (profile head sample, resident and lazy).
-- Layouts:
-  - plain, one chunk;
-  - plain, many chunks (slices of one array, chunk size 2 on chunked routes);
-  - plain, sliced, with a bad value in hidden storage outside the slice;
-  - dictionary, one chunk;
-  - dictionary, many chunks sharing one dictionary;
-  - dictionary, many chunks with different dictionaries;
-  - record batch and table.
-- Zones (timestamps only): naive; `UTC`; negative (`America/New_York`, `-08:00`); positive (`Asia/Kolkata`, `+05:30`,
-  `Pacific/Kiritimati`); zones where `pytz` and `zoneinfo` differ (`Australia/Sydney`, `Pacific/Auckland`,
-  `Europe/Berlin`); an unknown zone (`Factory`).
+- Routes: FF and AUTO; SEQ (`run_pipeline` sequential and direct `run_sequential`); OOC (`run_pipeline` out_of_core and `run_fk_out_of_core`, Python and native backend); CH; NCH; PAN (`run` and `run_single`); ISO (on and off); CLOUD (S3/GCS whole-object and range readers); HIVE (whole directory, and a batch reader on the partition file); PROF (head sample, resident and lazy).
+- Use: the column is date-strategy-read (`date_shift`), or only passed through.
+- Layouts: plain, one chunk; plain, many chunks; plain, sliced, with a bad value in hidden storage outside the slice; record batch and table; dictionary, any layout.
+- Zones (timestamps only): naive; `UTC`; negative (`America/New_York`, `-08:00`); positive (`Asia/Kolkata`, `+05:30`, `Pacific/Kiritimati`); zones where `pytz` and `zoneinfo` differ (`Australia/Sydney`, `Pacific/Auckland`, `Europe/Berlin`); an unknown zone (`Factory`).
 - Units: `date32`, `date64`, `timestamp` `s`, `ms`, `us`, `ns`.
-- Positions:
-  - ordinary;
-  - unused (a dictionary entry no row references; for plain, hidden storage outside a slice);
-  - referenced;
-  - null dictionary entry;
-  - at each bound: `lo` and `hi` themselves, one tick outside each, a band cell whose local time stays inside, and a
-    band cell whose local time leaves.
+- Positions: ordinary; hidden storage outside a slice; at each bound (`lo` and `hi`, one tick outside each, a band cell whose local time stays inside, and one whose local time leaves).
 
 | Cell group | Cells | Expected | Acceptance test | Mutation that must turn it red |
 |---|---|---|---|---|
-| R. Rule | every unit x zone x position, plain and dictionary, at the function | holdable per the table above; zone and dictionary structure pass rules 2 to 4; plain hidden storage ignored | AT-V12 (enumerated table), AT-V13 (property against the real conversion) | M-38 `<=` turned into `<` at `lo`; M-39 `ns` bounds left untested; M-40 local test skipped; M-41 offset sign flipped; M-42 band margin set to 0; M-43 only referenced dictionary entries tested; M-53 band offset from `zoneinfo`; M-54 null entry admitted |
-| Z. Zone library | Sydney and Auckland at the `ns` top, Berlin near the `ns` top, New York local mean time at the `ns` bottom, `Factory` | Sydney and Auckland refused; Berlin read where pandas reads it; New York at `INT64_MIN + 42` refused and at `INT64_MIN + 5h` read; `Factory` refused | AT-V12 rows, AT-V13 | M-53 |
-| A. Admission soundness | generated admitted date columns, every unit, zone and layout | `arrow_to_frame` on main's code converts; every `iloc`, every dictionary category and every `as_py` read succeeds and none is `NaT` for a non-null source cell | AT-V20 | M-39, M-53, M-54 |
-| L. Layout | each R cell in every layout | same decision and count for equivalent forms of one checked input; AT-V14 also pins the first refusing batch separately | AT-V14 (layout invariance property) | M-43; M-44 only the first chunk's dictionary tested |
-| P. Purity and cost | every admitted R cell in every layout; a 10M-row `int8`-coded `dictionary<date32>` | `check_source_dates(x) is x`; on the dictionary, the Arrow pool grows by less than 1 MiB on the pass path (decoding the rows would allocate 40 MB). The separate million-category cases keep parent peak growth below 32 MiB | AT-V15 | M-45 the check returns a rebuilt table; M-55 the pass path decodes dictionary rows; M-57 retains every category in the parent (separate AT-V15 RSS bound) |
-| T. Type gate (Q6 = A) | containers, list views, run-end-encoded, union, extension, dictionary of non-date, at the function and on FF, CH, NCH and a lazy route | `source_date_type_unsupported` with table, column and kind | AT-V3, AT-V4, AT-V5 (kept) | M-21, M-25, M-26, M-27 (kept) |
-| X. Route reach | the route-by-fixture table below | the literal expected outcome per executed cell; bounded heads, stream prefixes and transactional abort as specified below; the executed-cell count is exact | AT-V16 (route fingerprint), AT-V1 (kept: far date after the first 10,000 rows) | M-46 drop the check from one chunked entry; M-47 skip `check_resident_sources` in `PandasExecutionAdapter.run`; M-24, M-36 (kept read-sentry mutants) |
-| N. Name binding | lazy sources under a mapping key, stale `table=`, ISO manifest | refusal names the mapping key | AT-V7 (kept) | M-23, M-37 (kept) |
-| H. Reads unchanged | HIVE, CLOUD whole-object, a directory, a dotted projection, `columns=["key"]` | the Arrow input to conversion (or returned table) equals main's `pq.read_table` with the same arguments, schema and types included (`key` stays `dictionary<int32>`); a bad date in a partition file refuses with the mapping key | AT-V17 | M-49 reintroduce a dataset scanner without dictionary inference |
-| C. Conversion unchanged | admitted date dictionaries through FF, CH, fidelity report and post-scan; a named and an unnamed date `CategoricalIndex`; a MultiIndex with a date level; a sub-microsecond `time64` sibling on the resident profile | the pandas frame and the output equal those of `origin/main` on the same input | AT-V19 (differential against main) | M-50 discard the unused category in the AT-V19 ordered date dictionary |
-| S. Sentries | the read sentry with main's sinks, the decision-site rule, `_STOP_AT` | seeded bypasses fail; a seeded `arrow_to_series` call on unchecked data fails; `_STOP_AT` equals the measured count and is in the bound registry | AT-V8 (kept seeds 1, 2, 4, plus separate aliased frame and series calls in seeds 5 and 6), AT-V18 | M-48; M-51 raise `_STOP_AT` by one; M-52 inline the literal again; M-56 drop `arrow_to_series` from the sink set |
+| R. Rule | every unit x zone x position, plain, at the function | holdable per rule 5; hidden storage ignored | AT-V12, AT-V13 | M-38, M-39, M-40, M-41, M-42, M-53 |
+| Z. Zone library | Sydney and Auckland at the `ns` top, Berlin near the `ns` top, New York local mean time at the `ns` bottom, `Factory` | Sydney and Auckland refused; Berlin read where pandas reads it; New York at `INT64_MIN + 42` refused and at `INT64_MIN + 5h` read; `Factory` refused | AT-V12, AT-V13 | M-53 |
+| E. Exotic encodings | each kind, read and unread, at the function and on the routes in AT-V16 | read: type refusal with the kind and its fix sentence; unread: `result is data` and main's outcome; pandas-written controls admitted | AT-V21 | M-65 to M-73 |
+| A. Admission soundness | generated judged date columns, every unit and zone | `arrow_to_frame` on main's code converts; every `iloc` and every `as_py` read succeeds and none is `NaT` for a non-null source cell | AT-V20 | M-39, M-53 |
+| L. Layout | each R cell in every plain layout | same decision and count for equivalent forms of one checked input | AT-V14 | M-38 and M-40 also run through AT-V14 |
+| P. Purity and cost | every admitted cell; a 10M-row `date32` and a 10M-row `date64` column | `check_source_dates(x) is x`; Arrow pool growth below 1 MiB on the pass path | AT-V15 | M-45, M-72 |
+| T. Type gate (Q6 = A) | containers, list views, run-end-encoded, union, extension, dictionary of containers, at the function and on FF, CH, NCH and a lazy route | `source_date_type_unsupported` with table, column and kind | AT-V3, AT-V4, AT-V5 | M-21, M-25, M-26, M-27 |
+| X. Route reach | the route-by-fixture table below | the literal expected outcome per executed cell; the executed-cell count is exact | AT-V16, AT-V1 | M-46, M-47, M-24, M-36 |
+| N. Name binding | lazy sources under a mapping key, stale `table=`, ISO manifest | refusal names the mapping key | AT-V7 | M-23, M-37 |
+| H. Reads unchanged | HIVE, CLOUD whole-object, a directory, a dotted projection, `columns=["key"]` | the Arrow input to conversion equals main's `pq.read_table` with the same arguments (`key` stays `dictionary<int32>`) | AT-V17 | M-49 |
+| C. Conversion unchanged | admitted plain date columns, pandas-written zoned and `ArrowDtype` frames, unread date dictionaries and a date `CategoricalIndex` through FF, CH, fidelity report and post-scan | the pandas frame and the output equal those of `origin/main` | AT-V19 | M-66 (an unread dictionary judged) |
+| S. Sentries | the read sentry with main's sinks, the decision-site rule, `_STOP_AT` | seeded bypasses fail | AT-V8, AT-V18 | M-48, M-51, M-52, M-56 |
 
-**Fixture set F for AT-V16.** Each fixture is one table `t` with a column `c` and an ordinary `id` column. Each runs as
-one chunk and as chunks of two rows. Use the same logical rows in both layouts. Pad short fixtures with ordinary rows to make four rows. For F2 and F9 reference only entry 0, keeping their bad entry unused. Put the single bad cell of F4, F5 or F8 in the first pair. The literal supplemental cases below have their own layouts.
+**Fixture set F for AT-V16.** Each fixture is one table `t` with a date column `c` and an ordinary `id` column. The config gives `c` a `date_shift` strategy unless the fixture says "unread", where `c` is passed through. Each runs as one chunk and as chunks of two rows, with the same logical rows. Pad short fixtures with ordinary rows to four rows. Put the single bad cell of F4, F5 or F8 in the first pair.
 
 | Fixture | Column | Expected |
 |---|---|---|
-| F1 | plain `date32`, 10,004 rows with one year 10183 at row 10,001 (one-based, beyond the profile head and, in the split layout, in a later chunk, batch or row group) | when the reader reaches it, `source_date_unrepresentable`, `t`, `c`, `count == 1` |
-| F2 | `dictionary<timestamp[ns, America/New_York]>`, entries `[0, INT64_MIN + 42]`, rows reference only entry 0 | refused, `count == 0` |
-| F3 | `dictionary<date32>`, entries `[2020-01-01, 9999-12-31, 0001-01-01]`, rows reference the first two | read; output values equal the input; output type equals what `origin/main` gives for the same input |
+| F1 | plain `date32`, 10,004 rows with one year 10183 at row 10,001 (beyond the profile head, and in the split layout in a later chunk, batch or row group) | when the reader reaches it, `source_date_unrepresentable`, `t`, `c`, `count == 1` |
+| F2 | `dictionary<timestamp[ns, America/New_York]>`, entries `[0, INT64_MIN + 42]`, rows reference entry 0 | refused, kind `dictionary` |
+| F3 | `dictionary<date32>`, entries `[2020-01-01, 9999-12-31, 0001-01-01]`, rows reference the first two | refused, kind `dictionary` (E1) |
+| F3u | F3, unread | read; output equals `origin/main` |
 | F4 | plain `timestamp[us, Asia/Kolkata]`, `9999-12-31T23:00Z` | refused, `count == 1` |
 | F5 | plain `timestamp[ns]`, `INT64_MIN` | refused, `count == 1` |
-| F6 | plain `timestamp[us, America/Chicago]`, `9999-12-31T06:00Z` (a database "never" value) | read; output equals what `origin/main` gives |
-| F7 | `list<date32>`, dates in range | refused, `source_date_type_unsupported`, kind `list` |
+| F5u | F5, unread | refused, `count == 1` (Q8 = A) |
+| F6 | plain `timestamp[us, America/Chicago]`, `9999-12-31T06:00Z` | read; output equals `origin/main` |
+| F7 | `list<date32>`, dates in range | refused, kind `list` |
 | F8 | plain `timestamp[ns, Australia/Sydney]`, `INT64_MAX - 10h` | refused, `count == 1` |
-| F9 | `dictionary<date32>`, entries `[2020-01-01, null]`, rows reference entry 0 | refused, `count == 0` |
+| F9 | `dictionary<date32>`, entries `[2020-01-01, null]`, rows reference entry 0 | refused, kind `dictionary` |
+| F11 | plain `timestamp[ns, UTC]`, an epoch tick, pandas metadata `datetimetz` with zone `America/New_York` | refused, kind `pandas_metadata` (E4) |
+| F11u | F11, unread | read; output equals `origin/main` |
+| F12 | plain `date64`, first value 1 ms | refused, kind `date64_time_of_day` |
+| F12u | F12, unread | read; output equals `origin/main` |
 
-**Route by fixture (revision 8).** A `run` cell uses the fixture expectation. For F1, `head` means bounded success and `stream` means the prefix and refusal specified below. Exclude `n/a` cells. "Arrow" means a resident `pa.Table`, a
-`source_loader` result or chunked API batches. "Parquet" means a `LazySource` or a cloud object. A dictionary fixture
-must never be fed through Parquet to stand in for its Arrow form: Parquet stores no date dictionary, and the fixture
-would arrive as a plain column and test something else.
+"Arrow" means a resident `pa.Table`, a `source_loader` result or chunked API batches. "Parquet" means a `LazySource` or a cloud object. Parquet stores no date dictionary and no sub-day `date64`, so F2, F3, F3u, F9, F12 and F12u are Arrow-only. Never feed them through Parquet as stand-ins. Parquet keeps pandas metadata, so F11 and F11u run on every row. PROF has no strategy, so on PROF every fixture runs as its unread form (F3u, F11u, F12u, and F2 and F9 unread give main's outcome).
 
-| Route and input | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 | F9 |
-|---|---|---|---|---|---|---|---|---|---|
-| FF/AUTO, Arrow | run | run | run | run | run | run | run | run | run |
-| FF/AUTO, Parquet | run | n/a | n/a | run | run | run | run | run | n/a |
-| SEQ, loader (Arrow) | run | run | run | run | run | run | run | run | run |
-| SEQ, lazy Parquet | run | n/a | n/a | run | run | run | run | run | n/a |
-| OOC, Python (`run_fk_out_of_core`, `sources` as `pa.Table`) | run | run | run | run | run | run | run | run | run |
-| OOC, Python, Parquet | run | n/a | n/a | run | run | run | run | run | n/a |
-| OOC, native, Arrow | run | run | run | run | run | run | run | run | run |
-| OOC, native, Parquet | run | n/a | n/a | run | run | run | run | run | n/a |
-| CH, Arrow batches | stream | run | run | run | run | run | run | run | run |
-| NCH, Arrow batches | stream | run | run | run | run | run | run | run | run |
-| PAN `run` and `run_single`, Arrow | run | run | run | run | run | run | run | run | run |
-| ISO off, Arrow | run | run | run | run | run | run | run | run | run |
-| ISO on, Arrow | run | run | run | run | run | run | run | run | run |
-| CLOUD, S3/GCS range head | head | n/a | n/a | run | run | run | run | run | n/a |
-| CLOUD, S3/GCS whole Parquet object | run | n/a | n/a | run | run | run | run | run | n/a |
-| HIVE, batches from `key=7/part.parquet` | run | n/a | n/a | run | run | run | run | run | n/a |
-| HIVE, whole Hive directory | run | n/a | n/a | run | run | run | run | run | n/a |
-| PROF, Arrow | head | run | run | run | run | run | run | run | run |
-| PROF, Parquet | head | n/a | n/a | run | run | run | run | run | n/a |
+Route rows are those of revision 9 (Appendix B.4): 10 Arrow rows (FF/AUTO, SEQ loader, OOC Python, OOC native, CH, NCH, PAN, ISO off, ISO on, PROF) and 9 Parquet rows (FF/AUTO, SEQ lazy, OOC Python, OOC native, CLOUD range head, CLOUD whole object, HIVE batches, HIVE whole directory, PROF). With 15 fixtures on Arrow rows and 9 (F1, F4, F5, F5u, F6, F7, F8, F11, F11u) on Parquet rows, the grid is 150 + 81 = 231 keys per layout, 462 for both layouts.
 
-Parquet stores no date dictionary. For F1 to F9 the grid has 10 Arrow rows × 9 fixtures and 9 Parquet rows × 6 fixtures, or 144 keys per layout. Run both layouts (one row group or groups of two for files). Complete every grouped entry before recording its key.
+- On PROF resident, PROF Parquet and CLOUD range, request exactly 10,000 rows of F1. Assert the returned frame equals the first 10,000 good rows. Also run F10, which moves the far date to row 2, in both layouts, and require the coded refusal with count 1 (six keys). Count batch pulls on the bounded path.
+- On CH and NCH consume the public iterator with the fixture config. In split F1 compare each of the first 5,000 yields, in order, to its two input rows. The next pull refuses at rows 10,001 and 10,002 with count 1, and a later pull ends the iterator. Separately feed late F1 from a lazy file through the transactional auto-chunk route with a reference sink, threshold two and two-row chunks. Require abort, zero committed files or tables, and no staged output.
+- Literal keys (eight): duplicate date32 categories `[epoch, epoch]` with indices `[0, 1]`, and date32 `[epoch]` with a `uint64` index `[0]`, each read (kind `dictionary`) on PAN and NCH; `timestamp[ns, Factory]` with zero rows, and with two null rows, each read on PAN and NCH (date refusal, count zero).
+- Isolation keys (four): on forced ISO on and off, a resident table whose read column `c` is a `dictionary<date32>` with one ordinary chunk and a trailing zero-row chunk, and a wholly empty column with one zero-row dictionary chunk. All four refuse with kind `dictionary` in the parent before the writer runs. A spy on the writer records no call. A successful control runs inside the capped child.
+- Metadata and index keys (eight): F11's edge form (physical UTC `INT64_MIN + 42`, metadata New York), read, on FF Arrow and NCH (kind `pandas_metadata`); a pandas-written zoned frame stored with `coerce_timestamps="us"`, read, on FF Parquet and PROF Parquet (admitted, equals main); a frame with `timestamp[us][pyarrow]`, zoned `ArrowDtype` and `date64[ms][pyarrow]` columns, all read, on FF Arrow and NCH (admitted, equals main); a frame with a date `CategoricalIndex` stored as a dictionary index field, with a read plain date column, on FF Arrow and NCH (admitted: an index field is never read, equals main).
+- AT-V16 asserts exact key sets: 462 grid keys, 6 F10 keys, 8 literal keys, 4 isolation keys and 8 metadata and index keys, total **488**. For each refusal check the registered code, names-only variable text with the fix sentence, empty cause and context on the typed exception, and no source value in errors, logs or public results. Only the typed date exception carries the count.
 
-- On PROF resident, PROF Parquet and CLOUD range, request exactly 10,000 rows of F1. Assert the returned frame equals the first 10,000 good rows. For each, also run F10 in both layouts: move the single far date to row 2 and require the coded refusal with count 1. Count batch pulls on the bounded path. Never read a later batch to find F1. Whole-object CLOUD and whole-directory HIVE read F1 and refuse. For the HIVE batch case open the individual file with `ParquetFile` semantics and drain it to refusal. Only the directory read infers the partition key.
-- On CH and NCH consume the public iterator with an identity passthrough config. In split F1 compare each of the first 5,000 yields, in order, to its two input rows, including schema and stored values. The next pull refuses at rows 10,001 and 10,002 with count 1. A subsequent pull ends the iterator and no suffix batch is yielded. In the single-batch layout the first pull refuses with an empty prefix. If admission is eager, capture the first-batch refusal at the call. Separately feed late F1 from a lazy file through the transactional auto-chunk route with a reference sink, threshold two and two-row chunks. Assert the chunked route ran and staged the good prefix before the refusal. Require abort, zero committed files or tables, and no staged output. A consumer of the raw iterator owns each good yield.
-- Add four fixed Arrow inputs on a converting entry (PAN full-frame) and NCH native passthrough: duplicate date32 categories [epoch, epoch] with indices [0, 1], date32 [epoch] with uint64 index [0], and `timestamp[ns, Factory]` with zero rows or two null rows. Both public chunked APIs take an iterable of tables. Supply each batch as a table, including one explicit typed zero-row table for the empty case. Assert the public date code, names `t` and `c`, and typed count zero on each. Assert native dispatch on an admitted control.
-- On forced ISO on and off, supply the same two resident tables directly: (i) one ordinary chunk followed by a zero-row date32 dictionary chunk with an unused far entry, (ii) a wholly empty column with one zero-row chunk retaining that dictionary. Construct both with explicit dictionary arrays. Use a consuming route. Under A, in all four cases assert the public crashed result, identical registered date reason and safe summary, and zero outputs. Observe the typed error at classification to check names `t`, `c` and count zero in both modes. The public summary need not expose those fields. In ISO-on A prove refusal occurs before the lossy writer and that the successful control runs inside the capped child. Under B, ISO off refuses both original tables with the same date reason, count zero and no output. ISO on succeeds for both: the child converts the staged ordinary rows in the first case and a typed zero-row table in the second. Compare schema, rows and result with the corresponding main ISO-on run. Observe the staged Arrow argument to prove the far dictionary disappeared. Preserve the original in-process test input.
-- AT-V16 asserts exact key sets: 288 grid keys, six F10 head keys, eight literal structure/zone keys and four original-dictionary isolation keys, total **306**. The AT-V1 transactional run and AT-V14 count examples have independent assertions outside that tally. For each refusal check the registered code, names-only variable text, empty cause and context on the typed exception, and no source value in errors, logs or public results. Only the typed exception carries the count.
-
-**Additional public route cases (outside the 306-key grid).** AT-V14 and AT-V16 share the literal inputs below. A date refusal means `runtime/source_date_unrepresentable`, names `t` and `c`, value-free public text and the stated typed count.
-
-| Input and observation | Q8-A | Q8-B |
-|---|---|---|
-| Build a New York pandas frame, convert to Arrow, replace field `c` with UTC ns tick `INT64_MIN + 42` using `set_column`, retain and assert original pandas metadata. Use the same validated table for resident PROF `to_frame()` and native NCH unread carry. | Both refuse, count 1. | PROF restores New York and refuses, count 1. NCH returns the exact UTC tick and physical type. A metadata-ignoring #799 read of the same field reads UTC successfully. Pin an admitted epoch control that restores New York on PROF and retains UTC on NCH under both options. |
-| Two disjoint date32 dictionaries of 100 consecutive days each, int8 indices 0 through 99 in each. NCH first input is either one table with both internal chunks or the first of two one-chunk tables. PAN converts the combined original and each split input. | All admit. | Same. |
-| One date64 dictionary per chunk, single entries at 0 ms and 1 ms respectively, both referenced once. Also try 1 ms plain, alone in a dictionary and unused beside an aligned entry. | PAN and NCH on the two-chunk table refuse, count 1. Separate public batches yield the aligned first row then refuse, count 1, no further yield. Each standalone unaligned case refuses, count 1 if referenced and 0 if unused. | Same source-format refusals on conversion and carry. |
-| Plain `timestamp[ns, Factory]` in NCH's first table, populated (one epoch), typed empty or two nulls. Separately feed a good UTC first table and a Factory second table with identical column names. | First table refuses, counts 1, 0, 0. On the split stream yield the first table then refuse the populated second at the source boundary, count 1. | First table refuses with the date code and the same counts before the profile resolves its dtype. For a later unread carry the predicate admits the physical column. Yield the UTC prefix, then preserve main's `native_chunk_schema_drift` for the changed type, with no second yield. A stream starting in Factory never reaches its second table. |
-
-For the disjoint dictionaries assert native dispatch, exact carried indices, dictionary entries, order and type per input chunk, and PAN's matching logical days. Compare each first-table profile with the pandas walk of that same first table (200 versus 100 distinct days). In the existing `profile/arrow/_walk_arrow.py:44` profile calculation widen each dictionary chunk’s indices to int64 in profile scratch before combining differing dictionaries. Preserve the ordered flag. Keep the output column untouched. This fixes the admitted profile in both Q8 branches without adding another admission site. Pin a shared-category control so the distinct count is across chunks.
+**Factory on a passthrough stream (outside the 488 keys).** Plain `timestamp[ns, Factory]` in NCH's first table, unread, populated (one epoch), typed empty or two nulls: the first table refuses with counts 1, 0 and 0 (Q8 = A). Separately feed a good UTC first table and a Factory second table with identical column names: yield the first table, then refuse the populated second at the source boundary, count 1, with no further yield.
 
 #### Tests in detail
 
-- **AT-V12** (`tests/unit/io/test_source_date_hold_rule.py`, new). An enumerated table of every unit x zone x position
-  cell above, plain and as a dictionary entry (used and unused), each with its literal expected decision. It includes
-  the Z group rows:
-  - Sydney and Auckland at `INT64_MAX - 10h` and `INT64_MAX - 12h`: refused;
-  - Berlin at `INT64_MAX - 3601 s`: read;
-  - New York at `INT64_MIN + 42` (refused) and `INT64_MIN + 5h` (read);
-  - fixed offsets at both bounds;
-  - `Factory`: populated, typed empty and all-null columns refuse (the last two count zero);
-  - a null dictionary entry, used and unused: refused. Add the duplicate and uint64 literals from AT-V16 with count zero, and a mixed case with a referenced far entry to pin the nonzero count.
+- **AT-V12** (`tests/unit/io/test_source_date_hold_rule.py`, new). An enumerated table of every unit x zone x position cell, plain, each with its literal expected decision. It includes the Z rows: Sydney and Auckland at `INT64_MAX - 10h` and `INT64_MAX - 12h` (refused); Berlin at `INT64_MAX - 3601 s` (read); New York at `INT64_MIN + 42` (refused) and `INT64_MIN + 5h` (read); fixed offsets at both bounds; `Factory` populated, typed empty and all-null (refused, the last two count zero); an unread `date64` with a time of day at the last day of year 9999 (read) and at the first tick of year 10000 (refused). Expectations are literal only, written from the rule table and checked once against real conversion, never taken from the function under test.
+- **AT-V13** (same file). Hypothesis property over random `v`, drawn uniformly and from the bands (within `2 * M` of each `lo` and `hi`), for every unit and every listed zone, on plain columns with no pandas metadata. The oracle: successful #799 conversion and scalar access, successful Arrow `as_py()`, no non-null tick converted to `NaT`, and physical and local days in years 1 to 9999. The oracle computes no offset and has no band shortcut, so it shares no model with the implementation. Use a fixed seed and database, and pin any failing example as an AT-V12 row.
+- **AT-V14** (same file). Layout invariance on plain columns: random internal splits, `combine_chunks`, a record batch and a sliced array give the same decision and count for one checked input. A streaming entry checks each batch independently and stops at its first refusal. Its count can differ from a whole-table count, and the test pins that separately.
+- **AT-V15** (same file). For every admitted case of AT-V12 and AT-V14, `check_source_dates(x, table="t") is x`. Build a 10M-row `date32` and a 10M-row `date64` column (aligned) before measuring. Use a fresh Arrow proxy memory pool for the call and assert peak allocation below 1 MiB, including buffers freed before return. Restore the original pool after the measurement. M-72 (a full-length modulo array for the `date64` scan) must exceed the bound.
+- **AT-V16** (`tests/unit/execution/test_source_date_route_fingerprint.py`, new). The route-by-fixture table above, through the public entries, with the executed-key count asserted.
+- **AT-V17** (`tests/unit/profile/test_whole_file_read_unchanged.py`, replaces the branch's `test_whole_file_gate_q6a.py`). Cases: Hive directory `key=7/part.parquet`, no projection, `columns=["key"]`, `columns=["s.when"]`, a plain directory, and the in-memory S3/GCS whole object. For Arrow-returning reads compare the public rows and full schema, including metadata, with `pq.read_table(path, **same_args)`. For S3/GCS whole-object `to_frame()`, observe the table at the existing #799 conversion call and compare its rows, types and schema metadata with the reference read. These comparisons are green on base. M-49 breaks the Hive key type. A far `date32` in the partition file refuses with the mapping key (red on base).
+- **AT-V18** (in `tests/sentry/test_source_date_read_guard.py`). The decision-site rule, with a seeded `raise SourceDateUnrepresentableError(...)` in an in-memory copy of `internal/pandas_compat.py` and an aliased import of the error. `_STOP_AT` is a module constant, it is in `LIMITS`, and its live value equals the `sentry-limits` baseline. The sink census matches post-#799 `pandas_compat.py`.
+- **AT-V19** (`tests/unit/execution/test_source_date_conversion_unchanged.py`, new). A differential lock, green on base. Build the frames and outputs for the C cells on `origin/main`, record them as literal fixtures in the test, and assert that the head gives the same values, dtypes, index and columns. Include an unread ordered date32 categorical with entries `[2020-01-01, 9999-12-31, 0001-01-01]` and indices `[0, 1]` through the FF frame conversion, with all three ordered categories and codes pinned from base. For each base failure record the exact SHA, input, route and observed outcome.
+- **AT-V20** (`tests/unit/io/test_source_date_hold_rule.py`). Hypothesis property over generated judged date columns: every unit, the listed zones, one chunk and many, empty, all-null and populated, values drawn near both bounds, with bare schemas and with pandas-written metadata. For every admitted table: run #799's helper on that original table with its schema and call arguments, and assert conversion succeeds; every row's `iloc` succeeds and is not `NaT` for a non-null source cell; `as_py()` succeeds on every non-null value. Fields that rule 2 skips are outside the property by design and are covered by AT-V19 and AT-V21.
+- **AT-V21** (`tests/unit/io/test_source_date_encodings.py`, new). At the function, for each kind, a read field and the same field unread:
+  - `dictionary`: every plain date value type, in-range and far entries, signed and unsigned index widths including `uint64`, one chunk and differing chunk dictionaries, empty and all-null columns. Read: refused with kind and fix sentence, decided before any cell (an empty column refuses too). Unread: `result is data`, and no cell rule runs on it (a far entry is not counted).
+  - `pandas_metadata`: cases (a), (b) and (c) of rule 3; case (b) over an `int64` physical field; a stored index field with a mismatch (refused only if read, and an index is never read). Controls that must admit: `pa.Table.from_pandas` output for naive, zoned, `date` and `ArrowDtype` columns, the pandas-written `us` Parquet file, and a projection that leaves the mismatched field out.
+  - `date64_time_of_day`: a time of day at the first row, at an interior row between aligned extrema, and in hidden storage outside a slice (ignored). Read: refused. Unread: judged by its day.
+  - Use: a wrapper seeded to pass the empty `date_read` on FF must fail the route keys for F3 and F11 (M-73). `date_strategy_columns` returns exactly the `date_shift`, `bucket_perturb` and `windowed_date` anchor columns for a mixed config, and never a group_by companion or a hashed, kept, redacted or tokenized column.
+  - Every message: the literal text of rule 6, no value, empty cause and context.
+- **Kept from the branch, unchanged in purpose:** AT-V1 with F-style literal expectations; AT-V3 without the repair and IPC parts; AT-V4, AT-V5 and AT-V7; AT-V8 seeds 1, 2 and 4, plus seed 5 (`from decoy_engine.arrow_frames import arrow_to_frame as conv` on unchecked data) and seed 6 (`arrow_to_series` aliased, on an unchecked column); AT-V9 with the vocabulary `min_max`, `less`, `greater`, `or_`, `and_`, `invert`, `fill_null`, `sum`, `unique`, `is_null`, `divide` and `multiply` on integer views, allowing `cast` only to `pa.int32()` and `pa.int64()`, and excluding `take`, `local_timestamp`, `cumulative_sum` and `dictionary_decode`.
+- **Removed:** AT-V6 (repair), AT-V10 (owned date buffers, follow-up G-12), AT-V11 (moved to row DEP-FLOOR). AT-V2 moves to S5b (section 4.4c).
 
-  Expectations are literal only. They are written from the rule table and checked once against real conversion,
-  never taken from the function under test. Record where the proposed source domain refuses an input that conversion accepts.
-- **AT-V13** (same file). Hypothesis property over random `v`, drawn uniformly and from the bands (within `2 * M` of
-  each `lo` and `hi`), for every unit and every listed zone. First classify date64 alignment from the supplied raw fixture tick. An unaligned tick always refuses. For aligned dates and timestamps, build the original one-row table with the generated schema. Under A require successful #799 conversion and scalar access in both metadata modes when the field has an override, successful physical Arrow `as_py()`, no non-null tick converted to `NaT`, and physical and local days in years 1 to 9999. Under B use the actual read mode and the outcomes in section 15. The oracle does not compute an offset and has
-  no band shortcut, so it shares no model with the implementation. Use a fixed seed and database, and pin any failing
-  example as an AT-V12 row.
-- **AT-V14** (same file). Check each original table first, including differing dictionaries with null entries and two disjoint 100-entry date32 dictionaries with int8 indices and valid referenced rows. For the null case use [epoch, null] with indices [0, 1] and [epoch + one day, null] with [1, null]. Assert refusal with count 2 on the original and its equivalent splits. For the latter pin admission when each dictionary is valid. Arrow cannot combine or unify these examples directly. Compare random internal splits that preserve all entries and indices. Compare one chunk, `combine_chunks`, `unify_dictionaries` and a record batch only where Arrow can construct the same logical rows, dictionary structure and category domain. Generate transformable cases separately so each comparison actually runs. Compare with decoded plain values only for a valid dictionary with supported indices, no null entry and no unused bad entries. A construction failure never counts as a product result.
-  - Use entries [epoch, far] and indices [0, 0, 1]. Check the complete table with one chunk and with internal chunks of lengths 2 and 1. Both refuse with count 1. Feed those chunks as separate batches to CH and NCH. The first batch already contains the unused far entry, refuses with count 0, and yields no rows. Neither iterator resumes at the second batch.
-- **AT-V15** (same file). For every admitted case of AT-V12 and AT-V14, `check_source_dates(x, table="t") is x`. Also,
-  build the 10M-row `int8`-coded `dictionary<date32>` with three entries before measuring. Use a fresh Arrow
-  proxy memory pool for the call and assert peak allocation below 1 MiB, including buffers freed before return.
-  Restore the original pool after the measurement (M-55).
-  - In a fresh Linux worker acting as the ISO parent, warm imports and kernels, then build and touch the Arrow input from fixed-width buffers. Fork a fresh measurement process inheriting the resident buffers so fixture construction cannot set its high-water mark. That process runs the actual parent pre-writer check. Measure its own peak RSS through return or classified refusal, before writer allocation or child spawn. Subtract its resident baseline at entry (verify the idle measurement first). Require growth below 32 MiB, including Python heap and native temporaries.
-  - Use one million distinct in-range date32 entries with int32 indices. Use one named window limit of 8,192 elements for entry and index scans. Register it in the existing bound census. Test the clean dictionary, then duplicate its first entry in the last window (structural refusal, count 0). Separately replace the last entry with a far day and reference it three times in different index windows, interspersed with good and null indices (count 3). Keep nulls and references identical on the clean control. Assert the bound for each case under A. B tests the same bounded routines wherever its selected use requires the scan.
-  - Exact cross-window uniqueness may use a bounded day bitmap for the finite date domain. For wider ticks, partition by integer ranges and rescan bounded windows where needed. On refusal, test referenced entries by bounded gathers or block-local flags, including references to entries outside the current index window. M-57 accumulates all unique physical entries as Python integers in one set. The clean million-entry case must exceed the 32 MiB parent bound on the test node. A child memory limit or Arrow-pool-only measurement cannot kill M-57.
-- **AT-V16** (`tests/unit/execution/test_source_date_route_fingerprint.py`, new). The route-by-fixture table above,
-  through the public entries, with the executed-cell count asserted.
-- **AT-V17** (`tests/unit/profile/test_whole_file_read_unchanged.py`, replaces the branch's
-  `test_whole_file_gate_q6a.py`). Cases: Hive directory `key=7/part.parquet`, no projection, `columns=["key"]`,
-  `columns=["s.when"]`, a plain directory, and the in-memory S3/GCS whole object. For Arrow-returning reads compare the public rows and full schema, including metadata, with `pq.read_table(path, **same_args)`. For S3/GCS whole-object `to_frame()`, observe the table at the existing #799 conversion call, forward the original arguments, and compare its rows, types and schema metadata with the reference read from those bytes. Separately compare the public pandas frame, including index and dtypes, with main. These comparisons are green on base. M-49 breaks the Hive key type. The date-code assertion is red on base. A far `date32` in the partition file refuses with the
-  mapping key.
-- **AT-V18** (in `tests/sentry/test_source_date_read_guard.py`).
-  - The decision-site rule, with a seeded `raise SourceDateUnrepresentableError(...)` in an in-memory copy of
-    `internal/pandas_compat.py`, and an aliased import of the error.
-  - `_STOP_AT` is a module constant, it is in `LIMITS`, and its live value equals the `sentry-limits` baseline.
-  - The sink census matches post-#799 `pandas_compat.py` as stated above.
-- **AT-V19** (`tests/unit/execution/test_source_date_conversion_unchanged.py`, new). A differential lock, green on
-  base. Build the frames and outputs for the conversion cells on `origin/main`, record them as literal fixtures in the
-  test (generated once from base and committed), and assert that the head gives the same values, dtypes, index and
-  columns. For each base failure record the exact SHA, input, route and observed outcome. Keep a characterization test for each reproducible failure. For an irreproducible failure keep the evidence and explain why the comparison cannot run. Include an ordered date32 categorical with entries [2020-01-01, 9999-12-31, 0001-01-01] and indices [0, 1] through the FF frame conversion. Pin all three ordered categories and codes from base. M-50 removes the unused final category in a custom converter. The third category must be missing on the mutant even though the logical rows still agree.
-- **AT-V20** (`tests/unit/io/test_source_date_hold_rule.py`, new in revision 6, M3). Hypothesis property over
-  generated date columns: every unit, the listed zones, plain and dictionary, one chunk and many, values drawn near
-  both bounds. Generate empty, all-null and populated columns, duplicate categories (used and unused), shared values in different dictionaries, null entries, and all eight signed and unsigned integer widths. Include literal rejected examples as well as positive controls for every supported width. Check the stated refusals directly before the admission implication. Generate original tables with pandas metadata as well as bare schemas. Include the UTC/New York override above, non-ns source ticks at the restored ns boundary and a stored date index. For every admitted table and applicable conversion mode:
-  - run #799's helper on that original table, retaining its schema, chunk layout, index descriptors and call arguments. Assert conversion succeeds and inspect the corresponding restored column or index level by position;
-  - every row's `iloc` succeeds and is not `NaT` for a non-null source cell;
-  - for a dictionary, every entry in `series.cat.categories` reads as a scalar;
-  - `as_py()` succeeds on every non-null value and every dictionary entry.
-
-  Keep both dictionary checks. In pandas 2.3.3 the categories of `dictionary<timestamp[ns, zone]>` come back as
-  naive `datetime64[ns]`. Reading the original Arrow entries with `as_py()` checks their zone.
-
-  This ties S5's predicate to main's real conversion. A value the check admits and the conversion refuses fails here
-  before it can become a route split.
-- **Kept from the branch, unchanged in purpose:**
-  - AT-V1, with F-style literal expectations;
-  - AT-V2, which moves to S5b;
-  - AT-V3, without the repair and IPC parts;
-  - AT-V4, AT-V5 and AT-V7;
-  - AT-V8 seeds 1, 2 and 4, plus seed 5 (`from decoy_engine.arrow_frames import arrow_to_frame as conv` on unchecked
-    data), and seed 6 (`from decoy_engine.arrow_frames import arrow_to_series as conv`, then `conv(raw.column("c"), on_unrepresentable=callback)` in an unchecked caller);
-  - AT-V9 with the new vocabulary: `min_max`, `less`, `greater`, `or_`, `and_`, `invert`, `fill_null`, `sum`,
-    `unique` and `is_null`. Allow `pc.take` only inside the dictionary refusal counter, gathering the bad-entry
-    mask by indices after a failed entry check. Seed a pass-path `take` and require AT-V9 to reject it. Check the
-    AST argument of each array `cast`: allow only `pa.int32()` and `pa.int64()` for the physical integer views.
-    Seed `column.cast(arrow_type.value_type)` and require it to fail. Exclude `local_timestamp`, `cumulative_sum`
-    and `subtract`. Allow stdlib `datetime`, `pyarrow.lib.string_to_tzinfo` and the named metadata-fact import from the foundation package API. Keep the helper free of admission decisions.
-- **Removed:** AT-V6 (repair), AT-V10 (owned date buffers, follow-up G-12), AT-V11 (moves to row DEP-FLOOR).
-
-Red-first expectations by route
-
-- *Main defect on converting routes:* F5 becomes `NaT` and the F8 scalar read fails (rows 9 and 8).
-  The `Factory` case raises an uncoded resolver error (row 14).
-- *Contract change, red on main by design:* F5 and F8 on NCH and CH passthrough where main returns them exactly.
-  Include F2 and F4 on every route, F1 and F9 on passthrough where main returns them, and the date64 alignment cases listed under Q8.
-  Record the old success and the new refusal for rows 5, 7, 11 and 13 to 15, including the converting successes described under row 15.
-- *Different code on main:* F1 on whole reads that reach the far cell, F10 on bounded profiles, F9 on converting routes, and the failing conversion cases in rows 2, 3, 6, 12 and 15. The first-table Factory profile already fails on base. The late F1 bounded head is green on base.
-  The main profile conversion already refuses with `source_column_unrepresentable`.
-- *Red on the S5 branch head `a5da43ef9`:* F2 on `run_mask_chunked`, F8, and the round 6 layout and zone cases.
-- *Locks, green on base:* F3, F6, the AT-V17 read/schema comparisons and the AT-V19 differential on reproducible main outcomes. The AT-V17 far-date code is red on base.
+Red-first expectations by route:
+- *Main defect on converting routes:* F5 becomes `NaT` and the F8 scalar read fails. The `Factory` case raises an uncoded resolver error.
+- *Contract change, red on main by design:* F5u on NCH and CH passthrough where main returns it (Q8 = A); F2, F3, F9, F11 and F12 on every route where a date strategy reads them (Q9 = A); F4 on every route.
+- *Different code on main:* F1 on whole reads that reach the far cell, F10 on bounded profiles, the E3 literal keys on PAN.
+- *Locks, green on base:* F3u, F6, F11u, F12u, the pandas-written metadata and index controls, AT-V17 read and schema comparisons and the AT-V19 differential.
 
 Each mutation runs on the final head (catalog class 9).
 
 #### What the S5 branch keeps and what it discards
 
 **Port method.**
-1. Port S5b first. Build S5a on a fresh branch from main containing #799, #830 and the merged S5b hunks (baseline `395c1c662` or later).
-2. For a file that main and the branch both changed since `9812da814`, re-apply only the S5 hunks by hand.
-   `git diff 9812da814 a5da43ef9 -- <path>` lists them; take the hunks named in the table below onto main's version.
-   Never run `git checkout a5da43ef9 -- <path>` on these files, because it would revert #799. The files are:
-   - `CODEMAP.md`;
-   - `execution/_chunked_profile.py`, `_pandas_adapter.py`, `_pipeline_finalize.py`, `_sequential.py`;
-   - `execution/pipeline/_source_types.py`;
-   - `internal/pandas_compat.py`;
-   - `profile/_cloud_readers.py`, `_readers.py`, `_readers_resident.py`;
-   - `tests/native/test_chunked_entry_rev9_shapes.py`, `tests/native/test_chunked_entry_values_schema.py`;
-   - `tests/sentry/file_access_registry.toml`;
-   - `tests/unit/execution/run_stream/test_lazy_input.py`;
-   - `tests/unit/profile/test_supplied_table_profiling.py`.
-3. A file that main has not changed since `9812da814` may be taken whole from `a5da43ef9` and then edited as noted.
-   Check this with `git diff --quiet 9812da814 origin/main -- <path>`.
+1. Port S5b first (section 4.4c). Build S5a-1 on a fresh branch from main containing #799, #830 and the merged S5b (baseline `395c1c662` or later). S5a-2 builds on merged S5a-1.
+2. For a file that main and the branch both changed since `9812da814`, re-apply only the S5 hunks by hand. `git diff 9812da814 a5da43ef9 -- <path>` lists them. Never run `git checkout a5da43ef9 -- <path>` on these files, because it would revert #799. The files are: `CODEMAP.md`; `execution/_chunked_profile.py`, `_pandas_adapter.py`, `_pipeline_finalize.py`, `_sequential.py`; `execution/pipeline/_source_types.py`; `internal/pandas_compat.py`; `profile/_cloud_readers.py`, `_readers.py`, `_readers_resident.py`; `tests/native/test_chunked_entry_rev9_shapes.py`, `tests/native/test_chunked_entry_values_schema.py`; `tests/sentry/file_access_registry.toml`; `tests/unit/execution/run_stream/test_lazy_input.py`; `tests/unit/profile/test_supplied_table_profiling.py`.
+3. A file that main has not changed since `9812da814` may be taken whole from `a5da43ef9` and then edited as noted. Check with `git diff --quiet 9812da814 origin/main -- <path>`.
 4. Do not cherry-pick: the branch's 44 commits mix kept work, discarded work and S5b content.
 
 Kept hunks in the shared files:
 
 | File (both #799 and S5 changed it) | S5a takes | Stays main's |
 |---|---|---|
-| `execution/_chunked_profile.py` | the check call and the table-name plumbing | the `arrow_to_frame(..., source_column_unrepresentable(table_name))` calls (`:43`, `:170`) |
-| `execution/_pandas_adapter.py`, `execution/_sequential.py` | `check_resident_sources` / `checked_loader` wiring | everything else |
+| `execution/_chunked_profile.py` | the check call (empty `date_read`) and the table-name plumbing | the `arrow_to_frame(..., source_column_unrepresentable(table_name))` calls (`:43`, `:170`) |
+| `execution/_pandas_adapter.py`, `execution/_sequential.py` | `check_resident_sources` / `checked_loader` wiring, with `date_read` | everything else |
 | `profile/_readers.py` | the batch open gate, the one-open sample, the check on `to_table`'s result, the `table` field | every `arrow_to_frame` call (`:417`, `:500`, `:505`) |
-| `profile/_cloud_readers.py` | the range-reader schema gate; `check_source_dates` between `pq.read_table` and `arrow_to_frame` at `:272` and `:394` | the reads and conversions; no footer pre-gate |
+| `profile/_cloud_readers.py` | the range-reader schema gate; `check_source_dates` between `pq.read_table` and `arrow_to_frame` at `:272` and `:394` | the reads and conversions |
 | `profile/_readers_resident.py` | the `name` field and the check call | the fallback and `arrow_to_frame` at `:20` |
 | `execution/_pipeline_finalize.py`, `execution/pipeline/_source_types.py`, `internal/pandas_compat.py` | nothing | the whole file |
 | `CODEMAP.md` | rows for the new S5a files | the rest |
-| `tests/sentry/file_access_registry.toml` | nothing expected (S5a adds no file access); recompute only if the registry test says so | the rest |
+| `tests/sentry/file_access_registry.toml` | nothing expected; recompute only if the registry test says so | the rest |
 | the four shared test files | table name on the lazy copy and date expectations from 4.4a | #799's coded expectations for other types |
 
 Kept and discarded, by area:
 
 | Keep (port, then edit as noted) | Discard |
 |---|---|
-| `_arrow_types.py` (S5a only: date leaf, shape classifier, unclassified layouts and type walker on top of S5b) | `internal/pandas_compat.py` changes: working categorical, `WorkingInstant`, `stored_index_names`, `table_to_pandas`, `_refuse_unholdable` |
-| `io/source_dates.py`: schema gate, `_holds_dates`, `checked_batches`, lazy binding, `check_resident_sources`, `checked_loader`. Edit: drop `_repaired_dictionary`, `_without_unused_bad_entries`, `_fixed_offset_seconds` and the row-decoding count on the pass path; apply rules 2 to 4, including the structural refusal flag independent of count, and the resolver band test; return the input | `safe_output/_date_buffers.py` and its `own_date_*` exports in `safe_output/__init__.py` (no buffer rewrite), the `output_table` change and the `execution/chunked/_progress.py` hook |
-| `io/bounded_reader.py` errors (message built with `source_location_text`), `io/__init__.py` exports, the two reasons in `reasons/runtime/_part3.py` (summary and remediation rewritten as above), only the two source-error `reason_adapter._CODED` rows | `fileaccess/adapters/arrow.py` `read_table_gated` and the `pyarrow.dataset` import |
-| Entry wiring: the narrow staging-failure handler in `_isolated_run.py` on main, plus `_chunked.py`, `_chunked_input.py`, `_isolated_commit.py`, `_isolated_worker.py`, `native/_chunked_entry.py`, `out_of_core/_runner.py`, and the shared files per the table above. Keep `execution/_pipeline.py` to wire `checked_loader` and `check_resident_sources` into `run_pipeline` | `execution/pipeline/_source_types.py`, `execution/_pipeline_finalize.py`, the branch's `execution/pipeline/_post_scan.py` change (main moved the file to `post_scan/_gate.py`): main's versions stay |
+| `_arrow_types.py` (S5a-1: date leaf, shape classifier, unclassified layouts and type walker on top of S5b) | `internal/pandas_compat.py` changes: working categorical, `WorkingInstant`, `stored_index_names`, `table_to_pandas`, `_refuse_unholdable` |
+| `io/source_dates.py`: schema gate, `_holds_dates`, `checked_batches`, lazy binding, `check_resident_sources`, `checked_loader`. Edit: drop `_repaired_dictionary`, `_without_unused_bad_entries`, `_fixed_offset_seconds`, every dictionary entry test and the row-decoding count; add `date_read`, rules 2 to 4 and the resolver band test; return the input | `safe_output/_date_buffers.py` and its `own_date_*` exports, the `output_table` change and the `execution/chunked/_progress.py` hook |
+| `io/bounded_reader.py` errors (message built with `source_location_text`, kind fix sentences), `io/__init__.py` exports, the two reasons in `reasons/runtime/_part3.py` (summary and remediation as above), only the two source-error `reason_adapter._CODED` rows | `fileaccess/adapters/arrow.py` `read_table_gated` and the `pyarrow.dataset` import |
+| Entry wiring: the narrow staging-failure handler in `_isolated_run.py` on main, plus `_chunked.py`, `_chunked_input.py`, `_isolated_commit.py`, `_isolated_worker.py`, `native/_chunked_entry.py`, `out_of_core/_runner.py`, `execution/_pipeline.py`, and the shared files per the table above | `execution/pipeline/_source_types.py`, `execution/_pipeline_finalize.py`, the branch's `execution/pipeline/_post_scan.py` change: main's versions stay |
 | Profile: `_lazy_build.py`, `_source.py` (table name), and the shared profile files per the table above | `profile/_readers_resident.py` fallback rewrite |
-| `fileaccess/adapters/arrow.py` walker move and `projected_schema` (S5a) | `safe_output/_file_metadata.py` optional list-view rows and their tests in `tests/unit/safe_output/test_file_metadata.py` and `tests/unit/test_import_floor.py` (move to row DEP-FLOOR) |
-| `tests/native/_rev9_support.py`, `tests/native/_rev9_profile_cases.py` and `tests/native/test_unconfigured_passthrough_types.py`: keep the admitted-edge coverage and apply 4.4a to every refused carrier. Use the admitted carriers in the checked profile cases when porting the branch fixture loop. Keep `tests/native/test_unconfigured_passthrough_read.py` and `tests/unit/execution/test_full_frame_value_unrepresentable.py` for the sibling and coded-error claims in 4.4a | |
-| `tests/native/test_column_access_surfaces.py`: include the new `check_resident_sources` call in the adapter guard. `tests/unit/profiling/test_scan_set.py`: forward `**kwargs` through the spy so it still checks that the bounded head consumes one batch | |
-| Tests in `tests/unit/io/`: `test_source_date_type_gate.py`, `test_source_date_shape_classifier.py`, `test_source_date_nested_refusal_q6a.py`, `test_source_dates_vocabulary.py`, `test_checked_source_dates.py` (dictionary refusals and AT-V15 identity) and `test_source_dates_fixed_offset.py` (port cases to AT-V12). In `tests/unit/execution/`: `test_source_date_nested_routes_q6a.py`, `test_source_date_type_routes.py` and `test_source_date_unrepresentable.py`. Keep `tests/unit/profile/test_source_type_gate_projection_q6a.py`; the shared test files per the table above | Tests: `tests/unit/internal/test_working_categorical.py`, `test_no_import_time_timestamps.py`, `tests/unit/safe_output/test_date_buffers_ipc.py`, `tests/unit/profile/test_resident_fallback_dates.py`, `test_whole_file_gate_q6a.py` (replaced by AT-V17), `tests/unit/execution/test_source_date_reports_r1.py` (replaced by AT-V19), and `tests/sentry/test_signed_evidence_file_access.py` (its count change, 203 to 202, followed `read_table_gated`; main's file stays) |
-| `tests/sentry/test_source_date_read_guard.py` with main's sinks, `_STOP_AT` measured and registered, and the decision-site rule | The bare-statement rule in the read sentry (old M-29) |
-| `_execution_error.py`: extract `source_location_text` (new, about 10 lines) | |
-| Docs: `docs/strategies.md` S5 paragraph (edit per section 4.7, naming the narrowings in the comparison table), CODEMAP rows for new files, `changelog.d/date-range-s5-source-dates.md` listing the narrowed set | |
+| `fileaccess/adapters/arrow.py` walker move and `projected_schema` | `safe_output/_file_metadata.py` optional list-view rows and their tests (move to row DEP-FLOOR) |
+| `tests/native/_rev9_support.py`, `tests/native/_rev9_profile_cases.py`, `tests/native/test_unconfigured_passthrough_types.py`: keep the admitted-edge coverage and apply 4.4a to every refused carrier. Keep `tests/native/test_unconfigured_passthrough_read.py` and `tests/unit/execution/test_full_frame_value_unrepresentable.py` for the claims in 4.4a | the branch's dictionary repair and dictionary entry tests that rule 2 makes moot |
+| `tests/native/test_column_access_surfaces.py`: include the new `check_resident_sources` call in the adapter guard. `tests/unit/profiling/test_scan_set.py`: forward `**kwargs` through the spy | |
+| Tests in `tests/unit/io/`: `test_source_date_type_gate.py`, `test_source_date_shape_classifier.py`, `test_source_date_nested_refusal_q6a.py`, `test_source_dates_vocabulary.py`, `test_checked_source_dates.py` (dictionary cases rewritten per 4.4a), `test_source_dates_fixed_offset.py` (port cases to AT-V12). In `tests/unit/execution/`: `test_source_date_nested_routes_q6a.py`, `test_source_date_type_routes.py`, `test_source_date_unrepresentable.py`. Keep `tests/unit/profile/test_source_type_gate_projection_q6a.py` | `tests/unit/internal/test_working_categorical.py`, `test_no_import_time_timestamps.py`, `tests/unit/safe_output/test_date_buffers_ipc.py`, `tests/unit/profile/test_resident_fallback_dates.py`, `test_whole_file_gate_q6a.py` (replaced by AT-V17), `tests/unit/execution/test_source_date_reports_r1.py` (replaced by AT-V19), and `tests/sentry/test_signed_evidence_file_access.py` (main's file stays) |
+| `tests/sentry/test_source_date_read_guard.py` with main's sinks, `_STOP_AT` measured and registered, and the decision-site rule | the bare-statement rule in the read sentry (old M-29) |
+| `_execution_error.py`: extract `source_location_text` (about 10 lines) | |
+| Docs: `docs/strategies.md` S5 paragraph (section 4.7), CODEMAP rows, `changelog.d/date-range-s5-source-dates.md` listing E1 to E6 and the Q8 = A passthrough narrowings | |
 
-S5b (fitted distribution admission, row L, AT-V2) ports these files:
-- `contracts/calendar_range.py`, `contracts/distribution_snapshot.py` and only the `("decoy_engine.contracts.calendar_range", "FittedRangeError", "plan")` row in `reason_adapter._CODED`;
-- `generators/_distribution.py`;
-- `generation/_window_admission.py`, `generation/statistical/__init__.py`, `generation/statistical/_degenerate.py`;
-- only the two calendar day-number definitions at `a5da43ef9:src/decoy_engine/_arrow_types.py:23-24`. In the same S5b commit port the import and replacement of the literal pair at `verification/canary/_canonical.py:42`. The canary aliases consume the shared definitions. Verify one definition of each endpoint on the independent S5b head. Port the walker hunks only in S5a;
-- `tests/unit/generation/test_date_range_compile_routes.py`,
-  `tests/unit/generators/test_distribution_datetime_range.py`, `tests/unit/generators/test_columns_qa1.py`.
+New code on main, listed separately in the builder report: `pandas_effective_type_mismatches`, `execution/_source_date_use.py` (`date_strategy_columns`, `DATE_STRATEGIES`), the staging-failure handler and AT-V21. In the builder report, compare the path list from `git diff --name-only 9812da814 a5da43ef9` (75 files) with the paths assigned above and in section 4.4c. Give each path a disposition (keep, discard or S5b) and identify the hunks for mixed files. Resolve any missing disposition before porting.
 
-#799 changed none of these files, so the S5b-only files can be taken whole after the unchanged check. For the registry row and the two constant hunks use the per-hunk split above; the builder checks with
-`git diff --quiet 9812da814 origin/main -- <path>`. Round 6 found nothing open in this code. Its last DESIGN finding
-(the `1..9998` literal) closed in round 6.
+#### Size and slices
 
-In the builder report, compare the path list from `git diff --name-only 9812da814 a5da43ef9` (75 files) with the
-paths assigned above. Give each path a disposition (keep, discard or S5b) and identify the hunks for mixed files.
-Expand grouped test entries to full paths. The 75 branch paths and their assigned dispositions must match exactly. List new edits to main separately, including the metadata fact, staging-failure handler and carried dictionary profile widening. Resolve any missing disposition
-before porting.
+S5a is two PRs so each stays under about 800 new or changed lines. Ported lines were reviewed in rounds 3 to 6 and are listed separately.
 
-#### Size
+| Slice | Content | Ported from `a5da43ef9` | New or changed | Estimate |
+|---|---|---|---|---|
+| S5a-1 | Type gate (rule 1), exotic encodings (rules 2 to 4), `date_read` and `date_strategy_columns`, the metadata fact, entry wiring, name binding, ISO staging handler, read sentry with `_STOP_AT`, decision-site rule, both reasons and adapter rows, the kind messages; AT-V3 to AT-V5, AT-V7 to AT-V9, AT-V17, AT-V18, AT-V21, and AT-V16 for F2, F3, F3u, F7, F9, F11, F11u, F12, F12u and the literal, isolation and metadata keys | about 2,000 (about 650 source, 1,350 tests) | about 600: `source_dates.py` rules 2 to 4 (about 70), `_source_date_use.py` (about 40), the metadata fact (about 40), `source_location_text` and messages (about 30), sentry edits (about 60), AT-V21 (about 220), AT-V16 part (about 140) | about one day |
+| S5a-2 | Holdable rule (rule 5) with the resolver band test and count (rule 6), purity (rule 7), the 4.4a test edits; AT-V1, AT-V12 to AT-V15, AT-V19, AT-V20, and the rest of AT-V16 to the full 488 keys | about 700 (about 250 source, 450 tests) | about 650: rule 5 (about 90), AT-V12 to AT-V15 and AT-V20 (about 330), AT-V19 (about 100), AT-V16 rest (about 80), 4.4a edits (about 50) | about one day |
 
-| Slice | Ported from `a5da43ef9` | New or changed | Estimate |
-|---|---|---|---|
-| S5a | about 2,700 lines (about 900 source, 1,800 tests) already reviewed in rounds 3 to 6, with the shared-file hunks re-applied onto main by hand | about 750: `source_dates.py` rule edits (about 70 source lines net; the file goes from 319 to about 280), `source_location_text`, two read edits, the sentry sink set and rules (about 80), AT-V12 to AT-V20 (about 550 test lines) | about one day |
-| S5b | about 600 lines (about 300 source, 300 tests) | rebase only | half a day with review |
-
-Measure the touched modules on the ported head. Main's `execution/_isolated_run.py` is already 597 lines before the staging handler. Keep failure formatting in the existing classifier and retain the current ceilings and pins. One bound row is added, `_STOP_AT`, at its measured
-value. If the S5a build's new or changed lines pass 1,000, the builder stops and splits it:
-- S5a-1: the type gate, wiring, name binding and read sentry (all ported);
-- S5a-2: the holdable rule, the dictionary rule and AT-V12 to AT-V16 and AT-V20.
+Measure the touched modules on each head. Main's `execution/_isolated_run.py` is already 597 lines before the staging handler. Keep failure formatting in the existing classifier and keep the current ceilings and pins. One bound row is added, `_STOP_AT`, at its measured value. If either slice passes 800 new or changed lines, the builder stops and reports before splitting further.
 
 #### What is not S5
 
 | Item | Where it goes | Why not S5 |
 |---|---|---|
-| The output assembler mixes pandas display labels with Arrow field names. Integer or tuple column labels raise `IndexError` or `TypeError` during passthrough assembly (`execution/pipeline/_source_types.py`, round 6) | New row ASSEMBLER-LABELS (engine, V1 function break, R2, about half a day): map source-backed display labels to physical fields by position; tests with integer, tuple and duplicate-looking labels on FF passthrough. The builder re-anchors on main after #799 | Reproduces on main with ordinary integer data; S5 no longer touches the assembler |
-| Two resolvers read the stored index from pandas metadata (`execution/pipeline/_source_types.py` and `_pandas_meta/_columns.py` `stored_index_fields`) | The structure review list (owner 11-18: one structure review after V1), or folded into ASSEMBLER-LABELS if its fix needs one resolver | Pre-existing duplication; the third copy was S5's and is discarded |
-| The engine does not import at the declared floors: pyarrow 14 (unconditional list-view predicate, `safe_output/_file_metadata.py`) and pandas 1.5.3 (`validators/_dates.py:13`) | New row DEP-FLOOR (engine, R2): the branch's optional list-view rows and `test_import_floor.py`, exact-version CI legs that also run AT-V13 and AT-V20, and the pandas floor answer (Q7) | Pre-existing on main; independent of dates |
-| Hidden storage outside a slice is serialized when a caller writes a returned passthrough table to IPC (all types) | G-12, V2-LOG | The caller's own data returned to the caller; no trust boundary is crossed (V1 threat model: accidental leaks) |
+| The output assembler mixes pandas display labels with Arrow field names. Integer or tuple column labels raise `IndexError` or `TypeError` during passthrough assembly (`execution/pipeline/_source_types.py`, round 6) | Row ASSEMBLER-LABELS (engine, V1 function break, R2, about half a day): map source-backed display labels to physical fields by position; tests with integer, tuple and duplicate-looking labels on FF passthrough | Reproduces on main with ordinary integer data; S5 no longer touches the assembler |
+| Two resolvers read the stored index from pandas metadata (`execution/pipeline/_source_types.py` and `_pandas_meta/_columns.py` `stored_index_fields`) | The structure review list, or folded into ASSEMBLER-LABELS | Pre-existing duplication |
+| The engine does not import at the declared floors: pyarrow 14 (unconditional list-view predicate, `safe_output/_file_metadata.py`) and pandas 1.5.3 (`validators/_dates.py:13`) | Row DEP-FLOOR (engine, R2): raise the declared pandas floor to 2.x (Q7 = A), optional list-view rows and `test_import_floor.py`, exact-version CI legs that also run AT-V13 and AT-V20 | Pre-existing on main; independent of dates |
+| Date dictionaries and metadata-restored timestamps on columns no date strategy reads keep main's failures: the disjoint-dictionary union in the carried profile and AUTO join, and the restored-zone edge read whose error quotes a timestamp (E5 on an unread column) | G-16 and G-17 (section 16) | Pre-existing on main; Q9 = A leaves unread exotic columns to main by design |
+| Hidden storage outside a slice is serialized when a caller writes a returned passthrough table to IPC (all types) | G-12, V2-LOG | The caller's own data returned to the caller |
 | A Parquet file Arrow cannot decode fails with Arrow's error before the type refusal | G-14, log | Pre-existing; the read is main's read |
-| The resident profile fallback rebuild drops a stored index (round 5) | G-15, log | Pre-existing (round 5 says the rebuild predates S5) |
-| The holdable rule assumes pandas 2 keeps the source unit; pandas 1.x holds every timestamp in `ns` | DEP-FLOOR decides (Q7) | The engine does not import on pandas 1.5.3 today |
+| The resident profile fallback rebuild drops a stored index (round 5) | G-15, log | Pre-existing |
+
+### 4.4c S5b slice: fitted distribution admission (independent, buildable now)
+
+**Goal.** A fitted datetime snapshot that a fitted generator cannot compute is refused before any draw with `plan/generation_unbounded_column`, value-free. Working statistical and parametric jobs keep working.
+
+**Two generators, two rules.**
+- The *fitted sampler* `_generate_distribution_datetime` (`generators/_distribution.py`) is reached only through the legacy `ColumnGenerator.generate_column(n, {"type": "distribution", "snapshot": ...})`. It has no plan compile path. A V2 config with `type: distribution` goes to the parametric family through `generation/synthesize._generate_column` and never reaches it. Its domain is the ns range: bounds and live bins must lie in 1677-09-22 to 2262-04-10 (`contracts/calendar_range.py`, `admit_ns_datetime_snapshot`). It refuses with `FittedRangeError(prop=...)`, where `prop` is `"min"`, `"max"` or `"year_bins"`.
+- The *statistical generator* samples from live year bins (`count > 0`). Its rule is `SAMPLED_YEARS_RULE` (years 1 to 9998, `contracts/distribution_snapshot.py`). Fitted bounds outside the ns range are fine for it, because draws come from the bins. `check_degenerate` and `_window_admission._check_datetime` both apply the live-bin rule.
+
+**Fix 1 (r3 V1: AT-V2 pinned on the wrong generator).** The branch fixture `FAR` (max 9999-12-31 and a live 9999 bin) could pass on either check alone. Rewrite AT-V2 as two groups (below), with three independent fitted-sampler refusals that each carry one fault, and no 9999 bin in any fitted-sampler fixture.
+
+**Fix 2 (r3 DESIGN: two renderings of the sampled-year rule).** `_degenerate.py:176` on the branch raises `StatisticalSpecError(message="sampled years must lie in 1..9998")`, a second literal beside `SAMPLED_YEARS_RULE`. Replace it with the sentry-approved builder:
+
+```python
+refusal = config_refusal(
+    config_position("statistical", Name(spec.column)),
+    Problem.NOT_ALLOWED,
+    hint=SAMPLED_YEARS_RULE,
+)
+raise StatisticalSpecError(code=reasons.plan.GENERATION_UNBOUNDED_COLUMN, message=refusal.text)
+```
+
+This is the pattern `withheld_values_refusal` uses. It passes the config-refusal sentry (`tests/sentry/defects/_config_refusal_scan.py`): S1 accepts a message from a `Refusal` builder field, and S2 accepts `hint` as an UPPER constant imported from another module. No new baseline entry. Plan compile already rebuilds the error through `statistical_refusal(code, ...)` (`plan/_generation.py:145`, `:520`) with the registry summary, so the builder text appears only on direct `check_degenerate` calls. `_window_admission` keeps its own message, `f"{table}.{column}: {SAMPLED_YEARS_RULE}"`. Both messages take the rule from the one constant.
+
+**Files.**
+
+| File | Change |
+|---|---|
+| `src/decoy_engine/contracts/calendar_range.py` | new, 139 lines, taken whole from `a5da43ef9` |
+| `src/decoy_engine/contracts/distribution_snapshot.py` | `SAMPLED_YEARS_RULE` (one hunk) |
+| `src/decoy_engine/generators/_distribution.py` | admission before any draw, taken whole |
+| `src/decoy_engine/generation/_window_admission.py` | uses `SAMPLED_YEARS_RULE` and `names_far_year`, taken whole |
+| `src/decoy_engine/generation/statistical/__init__.py` | export, taken whole |
+| `src/decoy_engine/generation/statistical/_degenerate.py` | taken from the branch, then Fix 2 (about 10 lines) |
+| `src/decoy_engine/reason_adapter.py` | only the row `("decoy_engine.contracts.calendar_range", "FittedRangeError", "plan")` |
+| `src/decoy_engine/_arrow_types.py` | only the two calendar day-number definitions at `a5da43ef9:src/decoy_engine/_arrow_types.py:23-24` |
+| `src/decoy_engine/verification/canary/_canonical.py` | import those definitions in place of the literal pair at `:42` |
+| `tests/unit/generators/test_distribution_datetime_range.py` | rewritten fixtures (AT-V2a) |
+| `tests/unit/generation/test_date_range_compile_routes.py` | rewritten fixtures (AT-V2b) |
+| `tests/unit/generators/test_columns_qa1.py` | QA F7: a live 9999 bin with 2026 bounds now refuses (`year_bins`) instead of clamping |
+| `tests/sentry/test_sampled_years_rule_single_rendering.py` | new guard |
+| `changelog.d/date-range-s5b-fitted-admission.md` | names `plan/generation_unbounded_column` for the fitted sampler and the QA F7 change (the legacy sampler no longer clamps a far live bin) |
+| `docs/strategies.md` | one sentence on the fitted sampler's range (section 4.7) |
+
+#799 changed none of these files. Check each with `git diff --quiet 9812da814 origin/main -- <path>` before taking it whole. For the registry row and the two constant hunks, take only the named hunks. Verify one definition of each calendar endpoint on the S5b head.
+
+**Size.** About 600 ported lines (about 300 source, 300 tests) plus about 10 new source lines and about 130 new or changed test lines. Half a day with review. R2. Test depth: T1 plus the T2 gate set, and the config-refusal sentry and `tests/unit/test_reason_registry.py` in T1.
+
+**Tests (red-first).**
+- **AT-V2a, fitted sampler** (`test_distribution_datetime_range.py`). Each fixture has one fault. Before the sampler runs, the test checks that the snapshot validator accepts the fixture, so the refusal comes from the admission under test:
+  - max far: min 2020-01-01, max 9999-12-31, bins `[2020: 5]`. Expect `FittedRangeError`, `prop == "max"`.
+  - min far: min 0001-01-01, max 2020-12-31, bins `[2020: 5]`. Expect `prop == "min"`.
+  - live bin late: min 2020-01-01, max 2020-12-31, bins `[2020: 5, 2300: 3]`. Expect `prop == "year_bins"`.
+  - live bin early: the same with `1000: 3` in place of `2300: 3`. Expect `prop == "year_bins"`.
+
+  For each: `exc.code == plan/generation_unbounded_column`; `reason_from_exception(exc)` gives that public reason, so removing the `_CODED` row fails even though the exception keeps its code; the message equals the literal `"[plan/generation_unbounded_column] <prop>: a fitted datetime must lie in 1677-09-22 to 2262-04-10."`; no fixture year (`9999`, `0001`, `2300`, `1000`) appears in `str` or `repr`; empty cause and context; a spy on the draw records no call. No fixture has a 9999 bin, so a bin-only check cannot pass the two bound fixtures, and a bounds-only check cannot pass the two bin fixtures.
+  - Controls: min 1677-09-22, max 2262-04-10, bins `[1677: 2, 2262: 2]` draws inside the bounds (valid partial years at each ns edge). A zero-weight 2300 bin is not live and does not refuse.
+  - Parametric control (kept): a V2 config `type: distribution` column generates, and a spy shows `_generate_distribution_datetime` is never reached.
+- **AT-V2b, statistical rule** (`test_date_range_compile_routes.py`):
+  - refusal: min 2020-01-01, max 2020-12-31, bins `[2020: 5, 9999: 3]`. `check_degenerate` raises `StatisticalSpecError` whose message equals the literal `"statistical.c: not allowed. sampled years must lie in 1..9998"`. The builder renders it once with `config_refusal`, pins the literal, and records it in the report. `classify_window_table` raises `GenerationAdmissionError` with message `"t.c: sampled years must lie in 1..9998"`. Plan compile reports `plan/generation_unbounded_column`. Both messages contain `SAMPLED_YEARS_RULE`, and neither has a value from the snapshot outside the rule.
+  - controls that must pass `check_degenerate` and `classify_window_table`, then draw 20 rows with a fixed seed, all in 2020: max 9999-12-31 with bins `[2020: 5]`; min 0001-01-01 with bins `[2020: 5]`; a zero-weight 9999 bin (kept). These lock that working statistical jobs are not narrowed. Green on base expected; record the base outcome.
+- **Single-rendering guard** (`tests/sentry/test_sampled_years_rule_single_rendering.py`). An AST scan of `src/decoy_engine`: a string constant containing `sampled years must lie`, and an integer or string literal `9998`, appear only in `contracts/distribution_snapshot.py`. Red on `a5da43ef9` (the literal at `_degenerate.py:176`). The config-refusal sentry stays green with no baseline change.
+- Red on main: record the observed main outcome for each AT-V2a fixture (an uncoded `OutOfBoundsDatetime` or `ValueError` quoting a date, or a draw) and for the AT-V2b refusal.
+
+**Mutations.** M-58 to M-64 in section 7.
 
 ### 4.5 Placement
 
@@ -808,7 +667,7 @@ value. If the S5a build's new or changed lines pass 1,000, the builder stops and
 | S5 source boundary | Existing `io/bounded_reader.py` (CODEMAP.md:129), public checked Arrow reader API exported by `decoy_engine.io`. Error `SourceDateUnrepresentableError` in `io/bounded_reader.py:106`, code in `reasons/runtime/_part3.py`, adapter row `("decoy_engine.io.bounded_reader", "SourceDateUnrepresentableError", "runtime")` at `reason_adapter.py:57` | Profile and run readers may both import io under `.importlinter:22-25` |
 | S5 shared type walker (4.4b) | `type_children` and `type_nodes` move from `fileaccess/adapters/arrow.py:150-169` to the bottom-tier `decoy_engine/_arrow_types.py` (259 lines), which `io/source_dates.py` already imports; `fileaccess/adapters/arrow.py` imports them back | one copy of Arrow's nesting rules for the file-access type checks and the date gate; both consumers already import the bottom tier, and the date gate is not file access, so it does not belong in `fileaccess`. `_array_children` and `_walk` stay in `fileaccess/adapters/arrow.py:172-190` and zip with the moved `type_children` order: use `strict=True` at line 189 wherever `_array_children` is not empty, and add a `tests/unit/test_arrow_types.py` case that pins `type_children` for each kind (extension, dictionary, map, struct, union, list kinds, list views, run-end-encoded) |
 | S5 type gate and holdable rule (4.4b) | `SourceDateTypeUnsupportedError` beside `SourceDateUnrepresentableError` in `io/bounded_reader.py`; reason in `reasons/runtime/_part3.py`; adapter row `("decoy_engine.io.bounded_reader", "SourceDateTypeUnsupportedError", "runtime")`; gate, holdable rule and lazy binding in `io/source_dates.py` (about 290 lines) | the existing error and check live there; no new module |
-| S5 rule tests (4.4b, revision 5) | `tests/unit/io/test_source_date_hold_rule.py` (AT-V12 to AT-V15), `tests/unit/execution/test_source_date_route_fingerprint.py` (AT-V16), `tests/unit/profile/test_whole_file_read_unchanged.py` (AT-V17), `tests/unit/execution/test_source_date_conversion_unchanged.py` (AT-V19) | per-module unit homes; the route fingerprint sits with the other route tests |
+| S5 rule tests (4.4b, revision 5) | `tests/unit/io/test_source_date_hold_rule.py` (AT-V12 to AT-V15, AT-V20), `tests/unit/io/test_source_date_encodings.py` (AT-V21), `tests/unit/execution/test_source_date_route_fingerprint.py` (AT-V16), `tests/unit/profile/test_whole_file_read_unchanged.py` (AT-V17), `tests/unit/execution/test_source_date_conversion_unchanged.py` (AT-V19) | per-module unit homes; the route fingerprint sits with the other route tests |
 | S5 read guard (4.4b) | `tests/sentry/test_source_date_read_guard.py` (moved from `tests/unit/execution/test_source_date_unrepresentable.py`) | CODEMAP.md:165, beside the other choke-point sentries |
 | S5 type tests (4.4b) | `tests/unit/io/test_checked_source_dates.py` for the unit cases; route cases in `tests/unit/execution/test_source_date_unrepresentable.py` | the existing S5 test homes |
 | User docs | `docs/strategies.md` (date strategies, `preserve_values`), `docs/reasons.md` generated entries, `changelog.d/` fragments | section 4.7 |
@@ -836,7 +695,7 @@ Each slice documents the behavior it ships, in the same PR:
   - quarantine does not divert these rows (Q4);
   - `sentinel_to_null` versus `preserve_values` and the order they run in;
   - `group_by` with `preserve_values` (S2); windowed_date sentinel anchors give the anchor's sentinel in the derived column (S3, Q2); text_mask edge spans become the token (S4, Q5); generation excludes declared sentinels from the fit and emits them at their observed rate (S7, Q3).
-- S5 documents which source columns are read (plain date and timestamp columns and top-level dictionaries of them), that a column holding a date inside a list, map, struct or other container is refused with `runtime/source_date_type_unsupported` whatever its dates are, the remedy (drop, select out or cast the column), and that a date dictionary is refused when any entry, used or not, is outside the range a row can hold or when its index type is unsupported or a chunk has duplicate or null categories (remedy: decode the column or re-encode its dictionary). It names the `ns` and zoned limits in plain words, and it lists the inputs main accepted that S5 now refuses (section 4.4b, rows 5, 7, 11, 13 to 15, including the row 8 and 9 passthrough cases), subject to Q8. Document day alignment and each formerly successful date64 read in Q8. Include the restored-zone versus physical UTC example, row 14's first-profile failure and later schema drift, and the ISO on/off empty-dictionary outcomes for the selected option. Carry those cases into the compatibility contract and changelog. Under A a zone must resolve even on an empty or all-null column. It replaces `docs/strategies.md:403-405`.
+- S5 documents which source columns are read: plain date and timestamp columns on every route, judged by one rule (Q8 = A). A column holding a date inside a list, map, struct or other container is refused with `runtime/source_date_type_unsupported` whatever its dates are, with the remedy (drop, select out or cast the column). A column that a date strategy reads (`date_shift`, `bucket_perturb`, a `windowed_date` anchor) must be a plain date or timestamp column: a date dictionary, a pandas metadata type that differs from the Arrow type, or a `date64` with a time of day is refused with its kind and the fix "cast it to a plain date or timestamp column". The same encodings on a column that is only passed through, kept, hashed, redacted, tokenized or profiled keep working as before. It names the `ns` and zoned limits in plain words, and it lists E1 to E6 from section 0 and the Q8 = A passthrough narrowings (comparison rows 8, 9, 13 and 14 for plain cells, Appendix B.1). Under Q8 = A a zone must resolve even on an empty or all-null column. It replaces `docs/strategies.md:403-405`. S5b adds one sentence: the legacy fitted distribution sampler refuses a fitted bound or live year bin outside 1677-09-22 to 2262-04-10 with `plan/generation_unbounded_column`.
 - In S5a update #799's paragraph on `run_mask_chunked` and `run_mask_pipeline_chunked` in `docs/compatibility-contract.md`.
   The date check can raise `SourceDateUnrepresentableError` (`runtime/source_date_unrepresentable`) or
   `SourceDateTypeUnsupportedError` (`runtime/source_date_type_unsupported`) before conversion, including on NCH
@@ -866,10 +725,13 @@ Each slice documents the behavior it ships, in the same PR:
 | text_mask span at the calendar edge (S4) | uncoded `OverflowError` | the redaction token, as for an unparseable span (Q5) |
 | real date equal to a declared sentinel | unchanged | unchanged, counted in the post-mask report (S6) |
 | `date32` beyond year 9999 (S5) | profile conversion refuses with `source_column_unrepresentable` after #799. NCH passthrough returns the date | coded refusal `runtime/source_date_unrepresentable` naming table and column; batch count on the typed exception |
-| a date inside a list, map, struct, list view, run-end-encoded, union or extension column, or a dictionary of anything but plain dates (S5, 4.4b) | passes, or an uncoded Arrow error, or a hidden far value reaches output | refusal `runtime/source_date_type_unsupported` naming table, column and container kind, in or out of the calendar (Q6) |
-| ordered date32 dictionary with an unused year-10183 entry (S5, 4.4b) | main profile conversion refuses with `source_column_unrepresentable`. NCH passthrough returns it | refuse the whole column with `source_date_unrepresentable` and count zero when no row uses a bad entry |
+| a date inside a list, map, struct, list view, run-end-encoded, union or extension column, or a dictionary of a container (S5, 4.4b) | passes, or an uncoded Arrow error, or a hidden far value reaches output | refusal `runtime/source_date_type_unsupported` naming table, column and container kind, in or out of the calendar (Q6) |
+| a date dictionary, a stale pandas metadata type or a `date64` with a time of day on a column a date strategy reads (S5, Q9 = A) | the strategy receives a converted column, or a coded or value-bearing conversion error (E1 to E6) | refusal `runtime/source_date_type_unsupported` with kind `dictionary`, `pandas_metadata` or `date64_time_of_day` and the fix sentence |
+| the same encodings on a column no date strategy reads (S5, Q9 = A) | main's behavior | main's behavior (no change) |
+| plain far date on NCH passthrough (S5, Q8 = A) | returned exactly | refusal `runtime/source_date_unrepresentable` |
 | `LazySource` without `table=` in `sources` (S5, 4.4b) | refusal names table `source` | refusal names the mapping key |
-| distribution generator fitted on a far date (S5) | uncoded `OutOfBoundsDatetime` or `ValueError` quoting a date | `plan/generation_unbounded_column`, value-free |
+| legacy fitted distribution sampler with a far bound or a live year bin outside the ns range (S5b) | uncoded `OutOfBoundsDatetime` or `ValueError` quoting a date, or a clamp (QA F7) | `plan/generation_unbounded_column`, value-free, `prop` on the typed error |
+| statistical generation with a live year bin past 9998 (S5b) | record main's outcome in the S5b report | `plan/generation_unbounded_column` before any draw; far fitted bounds with only ordinary live bins still generate |
 | statistical generation with a declared sentinel (S7) | `plan/generation_unbounded_column` | admitted; sentinel emitted at its observed rate |
 
 Failure modes the design must not introduce: a sentinel counted as out of range (M-3); a refusal whose count or set depends on the key (M-9); a native route that computes a far row because it skipped the partition (M-4, sentry); a refusal message that quotes the cell (M-5); a half-written target (AT-R7).
@@ -933,7 +795,7 @@ Parity check (part of AT-R1, AT-R2): for every route pair the output table diges
 ### 6.7 Value-free refusals (S5)
 
 - AT-V1: place an unrepresentable date32 at row 10,001 in a later Parquet row group. Run FF, AUTO, SEQ, CH, NCH, OOC and ISO with an ordinary first 10,000 rows. Also exercise a first-batch profile failure, a resident table, a caller loader, opened batches and direct OOC. Assert runtime/source_date_unrepresentable, correct table and column, the batch count on the typed exception, exact names-only rendered text, no year in the error, log or child result, empty cause and context. Use the bounded-head, raw iterator prefix and transactional abort assertions in AT-V16. Compare counts inside one checked table or at the first refusing batch on a stream. Cover both ends for date32/date64 and each timestamp unit where such values exist, null-only batches, valid calendar endpoints and a timezone offset crossing a calendar endpoint.
-- AT-V2: compile a distribution generator with max 9999-12-31, min 0001-01-01, and an unsupported live bin between otherwise ordinary inputs as separate fixtures. The compile entry and a direct generator call both refuse with plan/generation_unbounded_column, before any draw. Assert no cell or bound in the message and empty cause and context. On the independent S5b head classify the actual direct-sampler exception through `reason_from_exception`. Assert the public reason is `plan/generation_unbounded_column`. Removing its registry row must fail this assertion even when the exception retains its code. Exercise valid partial years at each ns boundary.
+- AT-V2: moved to S5b and rewritten in revision 10. See AT-V2a (fitted sampler, three independent faults, `prop` asserted, no 9999 bin) and AT-V2b (statistical live-bin rule with positive controls) in section 4.4c.
 
 Section 4.4b tests. Write and run each regression before its fix. Record the failing assertion and head, then rerun
 the same test on the fix. For a control already green on the reference, obtain red on its named single-fault mutation
@@ -960,7 +822,7 @@ before restoring the correct wiring. Value-free means: no year, day number, coun
 - AT-V9 (rule 3 of 4.4b). An `ast` test over `io/source_dates.py` fails on any `pc.` call or attribute outside the allowlist and on any import outside the allowed modules. Enforce the refusal-only `take` and integer-view `cast` rules in section 4.4b, including aliased calls. A seeded `pc.list_flatten(column)` and a seeded `.storage` each fail it. A unit test calls the counting function with a `list<date32>` column and expects the internal error. Red: the S5 head uses `.keys`, `.items`, `.flatten()` and `pc.list_flatten`, and counts the list instead of raising.
 - AT-V10: removed in revision 5 (S5 no longer owns returned date buffers; follow-up G-12).
 - AT-V11: moved to row DEP-FLOOR (section 14). The import floor is pre-existing and independent of dates.
-- AT-V12 to AT-V20: specified in section 4.4b (rule, layout, purity, route fingerprint, reads unchanged, decision site and `_STOP_AT`, conversion unchanged).
+- AT-V12 to AT-V21: specified in section 4.4b (rule, layout, purity, route fingerprint, reads unchanged, decision site and `_STOP_AT`, conversion unchanged).
 
 ### 6.8 Generation (S7)
 
@@ -1027,41 +889,56 @@ Each runs on the final head (catalog class 9) and must turn the named test red.
 | M-40 | S5: the local wall-time test is skipped | AT-V12 zoned band rows, F4 |
 | M-41 | S5: the zone offset sign is flipped | AT-V12 New York and Kolkata rows, AT-V13 |
 | M-42 | S5: the band margin `M` is 0 | AT-V13 band draws, AT-V12 Kiritimati rows |
-| M-43 | S5: only referenced dictionary entries are tested | AT-V12 unused-entry rows, AT-V14, F2 |
-| M-44 | S5: only the first chunk's dictionary is tested | AT-V14 different-dictionary chunks |
+| M-43 | Retired in revision 10 (Q9 = A: no dictionary entry rule). Appendix A restores it under B | |
+| M-44 | Retired in revision 10 (Q9 = A). Appendix A restores it under B | |
 | M-45 | S5: the check returns a rebuilt table | AT-V15 |
 | M-46 | S5: remove the check from one chunked entry (`run_mask_chunked`, then separately `run_mask_pipeline_chunked`) | AT-V16 NCH or CH, AT-V8 |
 | M-47 | S5: skip `check_resident_sources` in `PandasExecutionAdapter.run` | AT-V16 PAN |
 | M-48 | S5: add a second check that raises `SourceDateUnrepresentableError` in `internal/pandas_compat.py` | AT-V18 decision-site rule |
 | M-49 | S5: reintroduce a dataset scanner for whole-file reads | AT-V17 Hive key type |
-| M-50 | S5: custom converter removes unused categories from the ordered FF date32 categorical | AT-V19 three-category fixture loses its final category |
+| M-50 | Retired in revision 10 (Q9 = A: unread dictionaries are main's conversion, covered by M-66) | |
 | M-51 | S5: raise `_STOP_AT` by one above the measured count | the `sentry-limits` ratchet test |
 | M-52 | S5: inline the measured literal again in place of `_STOP_AT` | AT-V18 and the bound census |
 | M-53 | S5: compute the band offset with `zoneinfo.ZoneInfo(zone)` instead of pyarrow's resolver | AT-V12 Sydney and Auckland rows, AT-V13, AT-V20, F8 |
-| M-54 | S5: admit a dictionary with a null entry | AT-V12 null-entry rows, AT-V20, F9 |
-| M-55 | S5: decode dictionary rows (`cast` to the value type) on the pass path | AT-V15 allocation assertion, AT-V9 |
-| M-57 | S5: retain the entire high-cardinality dictionary in a Python set during the parent check | AT-V15 parent peak RSS |
+| M-54 | Retired in revision 10 (Q9 = A: a read date dictionary refuses by kind, covered by M-65) | |
+| M-55 | Retired in revision 10 (Q9 = A: the check never sees dictionary rows). Appendix A restores it under B | |
+| M-57 | Retired in revision 10 (Q9 = A: no parent dictionary scan). Appendix A restores it under B | |
 | M-56 | S5: drop `arrow_to_series` from the read sentry's sink set | AT-V8 seed 6 and the sink census in AT-V18 |
+| M-58 | S5b: re-inline the literal `"sampled years must lie in 1..9998"` in `_degenerate.py` | single-rendering guard |
+| M-59 | S5b: the fitted admission drops its `min` and `max` checks and keeps the bin check | AT-V2a max-far and min-far |
+| M-60 | S5b: the fitted admission drops its live-bin check | AT-V2a live bin late and early |
+| M-61 | S5b: `FittedRangeError` always reports `prop="max"` | AT-V2a `prop` assertions |
+| M-62 | S5b: remove the `FittedRangeError` row from `_CODED` | AT-V2a `reason_from_exception` assertion |
+| M-63 | S5b: the statistical rule checks fitted bounds instead of live bins | AT-V2b refusal and both bound controls |
+| M-64 | S5b: the statistical rule counts zero-weight bins | AT-V2b zero-weight control |
+| M-65 | S5a: refuse a read date dictionary only when an entry fails the cell rule | AT-V21 in-range dictionary, AT-V16 F3 |
+| M-66 | S5a: judge the cells of an unread exotic field instead of skipping it | AT-V21 unread rows, AT-V16 F3u, F11u, F12u, AT-V19 |
+| M-67 | S5a: decide the `dictionary` and `pandas_metadata` kinds from values, so empty and all-null columns pass | AT-V21 empty rows, AT-V16 isolation keys |
+| M-68 | S5a: the metadata rule compares the `numpy_type` unit with the physical unit | AT-V21 pandas-written `us` Parquet control, AT-V16 metadata keys |
+| M-69 | S5a: the metadata rule ignores `ArrowDtype` spellings | AT-V21 case (b) rows |
+| M-70 | S5a: the metadata rule looks only at physical date fields | AT-V21 case (b) over `int64` |
+| M-71 | S5a: the `date64` time-of-day test reads only the extrema | AT-V21 interior row |
+| M-72 | S5a: the `date64` scan builds one full-length modulo array | AT-V15 allocation bound |
+| M-73 | S5a: a run wrapper passes an empty `date_read` | AT-V21 use rows, AT-V16 F3 and F11 on FF |
+| M-74 | S5a: the ISO parent leaves the schema rules to the child | AT-V16 isolation keys (the writer spy records a call) |
 
 
 ## 8. Frozen contracts and byte changes
 
 - New reason `runtime/date_outside_strategy_range` (`since=UNRELEASED`), error class `DateRangeError` (public, beside `WindowedDateError`), named in the S1 changelog fragment.
 - Deprecated with `replaced_by=("runtime", "date_outside_strategy_range")`: `runtime/out_of_core_bucket_perturb_date_out_of_native_range` (S1), `runtime/windowed_date_anchor_out_of_range` (S3). Deprecated with `replaced_by=None` (allowed by `reasons/_registry.py:202-209`, section 4.3): `plan/date_preserve_values_with_group_by_unsupported` and `runtime/date_preserve_values_with_group_by_unsupported` (S2).
-- New reason `runtime/source_date_unrepresentable` (`since=UNRELEASED`, S5a), kept beside #799's `runtime/source_column_unrepresentable` for the reasons in section 4.4b. Its summary and remediation name the calendar years, the `ns` limit, the zoned local-time test and the dictionary remedy. Both messages build their table and column phrase from one helper, `source_location_text` in `_execution_error.py`.
-- The S5a changelog records date64 day alignment under either option, including the plain, dictionary, separate-batch and carry successes listed in Q8. Record the metadata and isolation outcomes from AT-V16 for the selected option. Under A also list the following narrowings. On converting routes these include
-  out-of-calendar non-ns timestamp dictionary entries (row 5), unused zoned ns edge entries (row 7) and local times
-  outside the Python calendar that pandas can read (row 11). Include the dictionary conversions described below row 15 that succeed on main. On NCH passthrough, list far dates, bad dictionary
-  entries including unused and null entries, duplicate date categories, uint64 dictionary indices, and each successful carry identified in rows 13 to 15 (the first Factory profile already fails). Include zoned ns
+- New reason `runtime/source_date_unrepresentable` (`since=UNRELEASED`, S5a), kept beside #799's `runtime/source_column_unrepresentable` for the reasons in section 4.4b. Its summary and remediation name the calendar years, the `ns` limit, the zoned local-time test, and the type reason's remediation names each kind's fix. Both messages build their table and column phrase from one helper, `source_location_text` in `_execution_error.py`.
+- The S5a changelog records the Q8 = A narrowings for plain cells: zoned ns edges (row 8), plain or UTC `INT64_MIN` ns (row 9), out-of-calendar local times that pandas can read (row 11), and the passthrough returns of rows 13 and 14 (Appendix B.1), on NCH and on CH passthrough where main preserves them. It records E1 to E6 from section 0 for date-strategy-read columns, and states that the same encodings on columns no date strategy reads are unchanged.
   edges (row 8) and plain or UTC `INT64_MIN` ns (row 9) on NCH and on CH passthrough where main preserves them.
 - Amend #799's `run_mask_chunked` and `run_mask_pipeline_chunked` paragraph in `docs/compatibility-contract.md` with
   the two date codes, their exception classes and the NCH narrowing specified in 4.7. Update the dispatcher's
   matching date examples and keep #830's detector paragraph.
-- New reason `runtime/source_date_type_unsupported` (`since=UNRELEASED`, S5, section 4.4b) and public error class `SourceDateTypeUnsupportedError`. Behavior: a source column holding a date inside a selected container is refused under owner decision Q6 = A. A date dictionary with a non-holdable entry, used or not, is refused with `runtime/source_date_unrepresentable` (revision 5).
+- New reason `runtime/source_date_type_unsupported` (`since=UNRELEASED`, S5a-1, section 4.4b) and public error class `SourceDateTypeUnsupportedError`. Behavior: a source column holding a date inside a selected container is refused under Q6 = A. A date-strategy-read column that is a date dictionary, has a stale pandas metadata type or holds a `date64` time of day is refused under Q9 = A with kind `dictionary`, `pandas_metadata` or `date64_time_of_day`. The kind tokens are part of the frozen text contract.
+- S5b: `FittedRangeError` (code `plan/generation_unbounded_column`, attribute `prop`) is a new coded error with one `_CODED` row. The QA F7 behavior of the legacy sampler changes from a clamp to a refusal (changelog).
 - Post-mask report: new per-column field `declared_sentinel_rows` (S6, additive).
 - Config and snapshot: S7 admits preserve_values on date generators. Store optional stats.sentinels beside year_bins within distribution-snapshot/v2. Only bucket entry models forbid extra fields (contracts/distribution_snapshot.py:47,58,68). Existing v2 readers ignore the new field and emit no sentinel from it. An all-sentinel fit has no ordinary distribution for an older reader to sample. Round-trip old and new snapshots, exercise the pre-S7 reader, and run the full engine suite for this writer change.
 - Config: `preserve_values` becomes valid on `windowed_date` (S3, additive). No other config key changes.
-- Behavior: far dates that were `format_error` row errors become refusals; typed edge sentinels that were shifted become refusals. Logical output for in-range and declared rows is unchanged (AT-R1, AT-R2 digests against base). S5 leaves every admitted input and its pandas conversion byte-for-byte as main has them (AT-V15, AT-V19). For refused inputs, the comparison table distinguishes earlier coded refusals, conversion or scalar-read failures, silent `NaT` and inputs main returned successfully. The last group is the narrowing under Q8.
+- Behavior: far dates that were `format_error` row errors become refusals; typed edge sentinels that were shifted become refusals. Logical output for in-range and declared rows is unchanged (AT-R1, AT-R2 digests against base). S5 leaves every admitted input and its pandas conversion byte-for-byte as main has them (AT-V15, AT-V19). For refused inputs, the comparison table distinguishes earlier coded refusals, conversion or scalar-read failures, silent `NaT` and inputs main returned successfully. The last group is the narrowing under Q8 = A and Q9 = A (section 0).
 - Evidence: the `date_preserve` metric keeps its shape; the `out_of_core_bucket_perturb` disposition loses its native range reason value (internal).
 - Checks: `python scripts/release/reason_release_pin.py --check` and `python scripts/dev/registry_renumber.py --check --main origin/main` pass on every slice that touches reasons.
 
@@ -1187,8 +1064,9 @@ This row adds one input to the residual-PII identity count: for a column whose s
 
 | Slice | Repo | Content | After | Risk | Test depth |
 |---|---|---|---|---|---|
-| S5b | engine | Shared fitted distribution admission with the existing generation code (row L, AT-V2), the fitted-error adapter row, the two endpoint definitions from `_arrow_types.py` and the canary hunk that consumes them, `contracts/calendar_range.py`, docs line, changelog fragment; ported from `a5da43ef9` (section 4.4b) | nothing | R2 | T1 plus the T2 gate set |
-| S5a | engine | Checked Arrow ingestion: the Q6 = A type gate, the holdable rule over plain cells and every dictionary entry, a pure check that returns its input, lazy-source binding to the mapping key, entry wiring, the read sentry with main's conversion sinks, `_STOP_AT` measured and registered, and the decision-site rule, bottom-tier source errors and adapter rows (AT-V1, AT-V3 to AT-V5, AT-V7 to AT-V9, AT-V12 to AT-V20), user and reason docs, changelog naming the narrowed set. Fresh branch from `origin/main` `395c1c662` or later; S5 hunks re-applied onto main's files, never whole-file checkout of a file #799 changed (section 4.4b) | S5b; merge after the owner answers Q8 | R2 | T1 plus full suite and layer checks (reason registry, new reasons) |
+| S5b | engine | Fitted distribution admission (section 4.4c): the fitted sampler refuses far bounds and live bins outside the ns range with `FittedRangeError(prop=...)`; the statistical rule refuses live bins past 9998 through `config_refusal` with `SAMPLED_YEARS_RULE`; the `_CODED` row, the two endpoint definitions and the canary hunk; AT-V2a, AT-V2b, the single-rendering guard; M-58 to M-64; docs sentence and changelog. Ported from `a5da43ef9` plus the two r3 fixes | nothing | R2 | T1 plus the T2 gate set |
+| S5a-1 | engine | Checked Arrow ingestion, encodings: the Q6 = A type gate, the Q9 = A kinds with `date_read` and `date_strategy_columns`, the metadata fact, entry wiring, name binding, the ISO staging handler, the read sentry with `_STOP_AT`, the decision-site rule, both reasons and adapter rows (section 4.4b "Size and slices"). Fresh branch from main after S5b; S5 hunks re-applied onto main's files | S5b; merge after the owner answers Q9 | R2 | T1 plus full suite and layer checks (reason registry, new reasons) |
+| S5a-2 | engine | Checked Arrow ingestion, plain cells: the holdable rule on every route (Q8 = A), the resolver band test, count, purity, the 4.4a test edits, user docs and changelog naming the narrowed set | S5a-1 | R2 | T1 plus full suite (frozen behavior on passthrough) |
 | S1 | engine | `DateDomain`, bound `DatePartition`, `DateRangeError` and its `_CODED` row, range table, new reason, the required `partition` on six primitives and the 15 call sites, the internal native range invariant, OOC typed path through `apply_bucket_perturb_dates`, removal of the native decline and abort, deprecation of the native range reason, sentry, AT-R1 to AT-R12 and AT-C1 to AT-C3, section 6.9 test updates, user docs for the S1 behavior (section 4.7), changelog fragment | S5b (shared ns bounds) | R2 | T1 plus the full engine suite (reason registry, frozen behavior) |
 | S2 | engine | `group_by` with `preserve_values` on the Python path, two deprecations (`replaced_by=None`), AT-G1 to AT-G3, docs paragraph, changelog fragment | S1 | R2 | T1 plus full suite (reason registry) |
 | S3 | engine | `preserve_values` on `windowed_date` anchors, derived cell holds the anchor's sentinel (Q2), the anchor range on the shared code, deprecation, AT-W1 to AT-W3, docs, changelog fragment | S1 | R2 | T1 plus full suite (reason registry) |
@@ -1197,13 +1075,13 @@ This row adds one input to the residual-PII identity count: for a column whose s
 | S7 | engine | date generation: per-column fit kwarg, policy-aware snapshot writer and sentinel counts, matching generation declaration, admission (`_window_admission.py:128-170`, `:290-320`) and sampler (`_sample.py:493`, `_degenerate.py:122`) emitting sentinels at their rate (Q3), calendar-date stats in `_datetime_stats` and `_distribution_date`, AT-F1 to AT-F4, docs, changelog fragment | S1, S3 and S5 | R2 | T1, T2 and full engine suite (snapshot writer) |
 | S8 | CLI | Wire the per-column exact-fit option through fit_exact_snapshot, test CSV fit through generation, update command help, user guide and changelog | S7 engine API released and available to CLI | R2 | CLI suite and installed CLI/engine integration |
 | ASSEMBLER-LABELS | engine | Map source-backed pandas display labels to physical Arrow fields by position in the passthrough assembler (`execution/pipeline/_source_types.py:129,156`); tests with integer, tuple and duplicate-looking labels on FF. Pre-existing, found in S5 round 6 | nothing | R2 | T1 |
-| DEP-FLOOR | engine | Make the engine import at its declared floors: optional list-view predicates (`safe_output/_file_metadata.py:60-61`) and the pandas 1.5.3 failure at `validators/_dates.py:13`; AT-V11 and M-35 move here; exact-version CI legs. Pre-existing | owner answer on the pandas floor (section 15) | R2 | T1 plus the floor legs |
+| DEP-FLOOR | engine | Raise the declared pandas floor to 2.x (Q7 = A) and make the engine import at its declared pyarrow floor: optional list-view predicates (`safe_output/_file_metadata.py:60-61`); AT-V11 and M-35 move here; exact-version CI legs that also run AT-V13 and AT-V20. Pre-existing | nothing | R2 | T1 plus the floor legs and a full suite (version pin) |
 
-Each row is one PR. S4, S5b, ASSEMBLER-LABELS and DEP-FLOOR can start independently. S5a follows S5b (shared calendar constants). S1 follows S5b for the shared ns bounds. S2 and S3 follow S1. S6 follows S3 and PM-1. S7 follows S3, S5a and S5b with S1 already merged. S8 follows the S7 engine release.
+Each row is one PR. S4, S5b, ASSEMBLER-LABELS and DEP-FLOOR can start independently. S5a-1 follows S5b (shared calendar constants), and S5a-2 follows S5a-1. S1 follows S5b for the shared ns bounds. S2 and S3 follow S1. S6 follows S3 and PM-1. S7 follows S3, S5a-2 and S5b with S1 already merged. S8 follows the S7 engine release. If the owner picks Q9 = B, Appendix A replaces S5a-1 and S5a-2.
 
 ## 15. Owner decisions (product choices)
 
-The owner accepted the recommendations for Q1 to Q5 on 2026-11-27 and chose A for Q6 on 2026-11-28. Q7 and Q8 remain open.
+The owner accepted the recommendations for Q1 to Q5 on 2026-11-27, chose A for Q6 on 2026-11-28, and chose A for Q7 and Q8 on 2026-11-28. Q9 is open.
 
 - Q1, typed date columns. Decided: typed `date` columns (Parquet, database `DATE`) keep the 0001 to 9999 domain, less the strategy's reach. `9999-12-31` and `0001-01-01` are refused on the usual windows unless declared, and genuine historic dates such as `1600-01-01` still mask. Text and zoned timestamps use the pandas domain.
 - Q2, windowed_date with a declared sentinel anchor. Decided: the derived cell holds the anchor's sentinel value, so "unknown admission" gives "unknown discharge". Never the source value of the derived column.
@@ -1213,6 +1091,104 @@ The owner accepted the recommendations for Q1 to Q5 on 2026-11-27 and chose A fo
 
 - Q6, date columns inside containers (section 4.4b). Decided: (A), as given in the S5 redesign brief on 2026-11-28. A column holding a date inside a list, large list, fixed-size list, map or struct is refused by type even when every date is inside the calendar; full support is follow-up G-8. The options considered were (A) refuse for V1, (B) build G-8 inside S5, and (C) refuse only caller-supplied Arrow. List view, run-end-encoded, union, extension and dictionary-of-struct columns never come from a Decoy file reader, so refusing them is a technical choice and not part of Q6.
 
+- Q7, pandas floor (row DEP-FLOOR, not S5). Decided 2026-11-28: (A), raise the declared pandas floor to 2.x. The engine does not import on pandas 1.5.3 today (`validators/_dates.py:13`), so no working user is lost, and the S5a holdable rule keeps the source timestamp unit. The (B) branch is in Appendix B.2.
+
+- Q8, inputs main accepted that S5a refuses on routes that never convert. Decided 2026-11-28: (A), one holdable rule on every route, passthrough included, for plain date cells. Main can return zoned ns edges (row 8), `INT64_MIN` ns (row 9), readable year-10000 local times (row 11) and far plain dates (rows 13 and 14) on NCH and CH passthrough; S5a refuses them. Every plain `date64` is judged by its day. The (B) branch is in Appendix B.2. Under Q9 = A, Q8 = A does not reach exotic encodings on columns no date strategy reads (section 0.3).
+
+- Q9, S5a scope for exotic date encodings (section 0). Open for the owner. Three plan review rounds found a new pandas or Arrow behavior on date dictionaries and metadata-restored timestamps each time. Which scope should S5a take?
+  - (A) Refuse exotic encodings only where a date strategy reads them. A column that `date_shift`, `bucket_perturb` or a `windowed_date` anchor reads must be a plain `date32`, `date64` or `timestamp` column. A date dictionary, a pandas metadata type that differs from the physical Arrow type, or a `date64` with a time of day is refused there with `runtime/source_date_type_unsupported`, kind `dictionary`, `pandas_metadata` or `date64_time_of_day`, and the fix "cast it to a plain date or timestamp column", with no value in the message. The same encodings on a column that is only passed through, kept, hashed, redacted, tokenized or profiled keep main's behavior. A refuses these inputs that main reads today, only on date-strategy-read columns: in-range date dictionaries (E1) and timestamps whose pandas metadata names another zone or unit with ordinary values (E4), on FF, AUTO, SEQ, OOC, CH, NCH, PAN and ISO from caller-built Arrow, and E4 also from Parquet, cloud and Hive files. E2, E3, E5 and E6 are already refused under the decided Q8 = A (only the code changes). About 1,250 new or changed lines in two PRs.
+  - (B) Keep full parity on those encodings on every route. Change the carried profile, the AUTO join, the legacy collector and the sink join for dictionary unions, extend the metadata fact to `ArrowDtype` restoration, keep the dictionary entry rules and the memory tests, and enumerate the writers that receive date dictionaries. About 1,650 new or changed lines in three PRs (Appendix A). New reviews may find more operations.
+  - The planner recommends A. S5a-1 and S5a-2 are written for A, can start on that assumption, and merge after the answer.
+
+Technical choices taken (recommended option, no owner call needed): keep the name `preserve_values`; reach from config, not the key; refuse near-bound text dates on every route instead of computing them on some; keep `sentinel_to_null` separate with casting first; keep generation's plan-time refusal code; no rename of the out-of-core disposition fields.
+
+## 16. Follow-ups (not in this row)
+
+- G-2: compute text dates on the Python calendar after the pandas parse, which would widen the text domain to the typed one.
+- G-3: shuffle over `timestamp[ns]` returns `timestamp[us]` on full_frame.
+- G-4: CLI hint for `date_outside_strategy_range`, and `decoy scan` suggesting `preserve_values` from the pre-scan sentinel flags.
+- G-5: compile check order differs between the chunked and full-frame paths for a naive timestamp with `preserve_values`.
+- G-7: CLI test for `--chunked` CSV staging with a refusing far date (CLI repo).
+- G-8: full support for dates inside list, map, struct, list view, run-end-encoded and dictionary-of-struct columns (section 4.4b); the owner picked Q6 (A). Needs the output-type decision first.
+- G-11: dropped in revision 5 (the bare-statement rule is removed because the check is pure).
+- G-12 (V2-LOG): hidden storage outside a slice is serialized when a caller writes a returned passthrough table to IPC (all types; the caller's own data).
+- G-13: decided in revision 6 (S5a refuses a date dictionary with a null entry on every route); no follow-up.
+- G-14: a Parquet file Arrow cannot decode (null parent in `fixed_size_list<date32>`) fails with Arrow's error before the type refusal (pre-existing).
+- G-15: the resident profile fallback rebuild drops a stored index (pre-existing, S5 round 5).
+- Structure review list: one resolver for the stored index (`execution/pipeline/_source_types.py:45` and `_pandas_meta/_columns.py:26`).
+- G-6: relationship validators read a far output date as unparsed (`validators/_dates.py:71-80`); confirm sentinel rows are skipped, not counted as violations.
+- G-16: two disjoint date dictionaries whose union needs a wider index fail in the carried profile (`profile/arrow/_walk_arrow.py:44`) and in the AUTO join (`execution/_pipeline_auto_chunk.py:144`). Pre-existing on main, also for non-date dictionaries. Under Q9 = A it stays main's behavior on unread columns. Log; fix with the shared union in Appendix A item 2 if a customer needs it.
+- G-17: on a column no date strategy reads, a timestamp whose pandas metadata restores another zone fails a restoring read with timestamp text in the message (E5, Codex plan r3). Pre-existing on main. Under Q9 = A S5 leaves the column to main. Log; fix in #799's conversion error path, which can catch the restore failure and raise its coded, value-free error.
+
+## Appendix A. If the owner picks Q9 = B
+
+Under B, S5a-1 and S5a-2 are replaced by three slices. Each restores revision 9 text from `c19c945c9` (Appendix B.4) and adds the operations of section 0.2.
+
+| Slice | Content | New or changed (about) |
+|---|---|---|
+| S5a-B1 | Revision 9 rules 1 to 5 (dictionary structure and entries, count, purity), the metadata fact for `datetimetz` and `ArrowDtype` with both interpretations under Q8 = A, the ISO original-dictionary projection with its scratch bound; AT-V12 to AT-V15 and AT-V20 in their revision 9 form; M-43, M-44, M-54, M-55, M-57 restored | 700 |
+| S5a-B2 | Dictionary unions without unification into the original index width and without a row-sized allocation: carried profile (`profile/arrow/_walk_arrow.py:44`), AUTO join (`execution/_pipeline_auto_chunk.py:144`), legacy collector (`execution/_chunked.py:585`), sink join (`execution/_chunked_output_sink.py:397`); Arrow pool peak tests on the profile and the AUTO join; 200-category correctness on all four | 500 |
+| S5a-B3 | The writers and reports that receive a date dictionary output (Parquet, CSV and IPC sinks, the fidelity report, post-scan): list them, test each with a 200-category and a disjoint input; AT-V16 at the revision 9 count of 306 keys plus the new writer keys; AT-V19 with M-50 restored | 450 |
+
+Order: S5b, then S5a-B1, S5a-B2, S5a-B3. Each is R2 with a full suite (frozen behavior, serialization). Plan review restarts at Dennis for S5a-B2 and S5a-B3, which no review has seen.
+
+## Appendix B. Superseded detail
+
+Kept for the record. Nothing in this appendix is part of the revision 10 build.
+
+### B.1 Revision 9 options and comparison with main
+
+The comparison rows below are cited from section 0 and section 15. "Rule A" and "Q8-A" in this text are the revision 9 names. The text is unchanged from revision 9.
+**Why this rule (options considered).** The brief asked for the simplest rule that satisfies Q6 = A and that can be
+tested exhaustively.
+
+| Option | What it does | Verdict |
+|---|---|---|
+| A. Check the index type, category uniqueness and every entry, used or unused (proposed under Q8-A) | One predicate for plain cells and dictionary entries; the read never changes data | Chosen. See below |
+| B. Decode every date dictionary to a plain column at the read, then test cells | One cell rule, but the read returns new data | Rejected: changes the output type of every valid date dictionary from `dictionary<date32>` to `date32`, loses ordered-categorical sorting, and still needs the holdable test for the decoded cells. The check would again return data callers must use |
+| C. Test only referenced entries, then repair the dictionary (the S5 branch) | Drops unused bad entries, remaps codes, builds a pandas working copy | Rejected: this is the design that failed rounds 3 to 6 |
+| D. Refuse every date dictionary | No dictionary rule at all | Rejected: refuses in-range dictionaries that main converts correctly, and narrows the shapes Q6 = A admits, which is an owner call |
+
+**What rule A changes against main (corrected in revision 6, M1).** Revision 5 said that rule A refuses only inputs
+that already fail on main. That was measured against raw `to_pandas`, not against main's `arrow_to_frame`, and it is
+false as written. The probe below ran main's own `arrow_to_frame` from a `git archive` of `d1d7453ac`, with the same
+library versions, 2026-11-28:
+
+| # | Input | Main `d1d7453ac` (convert, then read the rows) | S5a | Kind |
+|---|---|---|---|---|
+| 1 | `dictionary<date32>`, entries in years 1 to 9999 including `0001-01-01` and `9999-12-31`, used or unused | converts, rows read | read | same |
+| 2 | `dictionary<date32>`, unused entry in year 10183 | refused, `source_column_unrepresentable` | refused, `count == 0` | other code, earlier |
+| 3 | plain `date32`, year 10183 | refused, `source_column_unrepresentable` | refused, `count == 1` | other code, earlier |
+| 4 | `dictionary<timestamp[us]>`, `9999-12-31` used | converts, rows read | read | same |
+| 5 | `dictionary<timestamp[s\|ms\|us]>`, an entry before year 1 or after year 9999 | converts, rows read | refused | **narrowing** (calendar domain) |
+| 6 | `dictionary<timestamp[ns]>`, entry `INT64_MIN` | refused, `source_column_unrepresentable` | refused | other code, earlier |
+| 7 | `dictionary<timestamp[ns, America/New_York]>`, unused entry `INT64_MIN + 42` | converts, rows read (the entry is never read) | refused, `count == 0` | **narrowing** |
+| 8 | plain `timestamp[ns, America/New_York]` `INT64_MIN + 42`; `timestamp[ns, Asia/Kolkata]` `INT64_MAX`; `timestamp[ns, Australia/Sydney]` `INT64_MAX - 10h` | converts; reading the cell raises `OutOfBoundsDatetime` quoting a timestamp | refused | main defect on conversion (value in the message) |
+| 9 | plain `timestamp[ns]` or `timestamp[ns, UTC]`, `INT64_MIN` | converts to `NaT` without notice | refused | main defect on conversion (a value is lost) |
+| 10 | plain `timestamp[ns]`, `INT64_MAX` | converts, rows read | read | same |
+| 11 | plain `timestamp[us, Asia/Kolkata]`, `9999-12-31T23:00Z` (F4) | converts; pandas reads the cell (`10000-01-01 04:30+05:30`); only Python `as_py` fails | refused | **narrowing** (calendar domain) |
+| 12 | `dictionary<date32>` with a null entry | refused, `source_column_unrepresentable` | refused (G-13) | other code, earlier |
+| 13 | rows 2, 3, 5, 6, 7, 8, 9, 11 and 12 on NCH passthrough, also rows 8 and 9 on CH where it returns the original column | returned exactly | refused | **narrowing** |
+| 14 | plain timestamp in unknown zone `Factory`, populated, zero rows or all null | conversion raises uncoded `UnknownTimeZoneError('Factory')`. First-table NCH carried profiling also resolves the dtype and raises. A later table with a changed physical zone encounters schema drift | coded date refusal under A | first-table profile failure becomes coded; see route cases below |
+| 15 | date32 dictionary with entries [epoch, epoch] and indices [0, 1], or [epoch] with uint64 index [0] | pandas conversion fails on these one-chunk literals. Native carried passthrough preserves the Arrow dictionary | date refusal, count 0 | earlier coded error on conversion, **narrowing** on passthrough |
+
+On routes that convert these columns, S5a gives an earlier date code for rows 2, 3, 6 and 12. It prevents the scalar read failure
+in row 8, silent loss in row 9 and the uncoded resolver error in row 14. Row 15 covers dictionary structure. Some multi-chunk conversions on main unify duplicate categories and succeed. On the pinned stack pandas also reads an epoch category in a dictionary of `timestamp[ns, Factory]` as a naive timestamp. Include these converting successes in the Q8-A narrowing alongside the passthrough cases. Main can read rows 5, 7 and 11.
+On passthrough, rows 13 to 15 show which accepted inputs would now fail. Only the dictionary forms require
+caller-supplied Arrow. Include each narrowing in the changelog and section 4.7. Q8 remains open. The build assumes
+option A pending the owner's decision.
+
+Why A is otherwise sound:
+
+- *Counts cover one checked input.* Internal chunk boundaries in a table do not reset its count. Equivalent splits retain the original dictionary entries, index type and logical rows. Combining dictionaries can remove a duplicate or discard an empty dictionary, which changes the input to this rule. AT-V14 only compares equivalent representations. A streaming entry checks each batch independently and stops at its first refusal. Its count can differ from a whole-table count.
+- *The refusal reaches only caller-supplied Arrow* for dictionaries. A date dictionary reaches the engine only as
+  resident `sources`, a `source_loader` result or chunked API input, where the caller can decode or re-encode the
+  column. The refusal text says so.
+- *Q6 = A holds.* The type gate and the admitted shapes are those of revision 4. Rules 2 to 4 decide which values and dictionary structures those shapes can carry.
+
+### B.2 The Q7-B and Q8-B branches (not chosen)
+
+The owner chose Q7 = A and Q8 = A on 2026-11-28. The revision 9 text of both questions, with their B branches, follows unchanged.
 - Q7, pandas floor (row DEP-FLOOR, not S5). Open. The engine does not import on pandas 1.5.3 today (`validators/_dates.py:13`), and the S5a holdable rule assumes pandas 2 keeps the source timestamp unit. Options: (A) raise the declared pandas floor to 2.x; (B) keep 1.5.3, fix the import and make the rule use the `ns` range on pandas 1.x. The planner recommends (A): main already fails on 1.5.3, so no working user is lost, and one rule stays one rule. S5b is independent. For B, land the 1.5.3 import fix and use version-aware bounds in the one predicate. Intersect each source timestamp unit with the representable ns interval on pandas 1.x, rounding inward in source ticks, in both UTC and local time. On that floor replace pandas-2-only expected successes, including F6, with literal floor outcomes. Pin the first and last admitted ticks, their refused neighbors, and the actual conversion on each supported floor in AT-V12/13/19/20. Use floor-specific admitted extremes in 4.4a, including the first and last ticks whose local and UTC times both fit. If Q8-B is also selected, keep the original Arrow extremes on carry-only paths. Keep the native-unit expectations on pandas 2. Verify on test nodes before claiming floor support.
 
 - Q8, inputs main accepted that S5a would refuse. Open for the owner. On converting routes, these include an
@@ -1237,9 +1213,13 @@ The owner accepted the recommendations for Q1 to Q5 on 2026-11-27 and chose A fo
     Keep the AT-V16 key set under B. Record each grouped public entry's use and literal outcome. Apply these outcomes to AT-V1, 4.4a, AT-V19, the compatibility contract and changelog. AT-V13/20 check referenced pandas reads on the original conversion input; A also checks all original Arrow entries and Python calendar bounds. For M-46 use a first-batch converting failure on each public entry with a column the strategy reads. AT-V18 kills M-48.
   - The planner recommends A. S5a can start on that assumption. Merge waits for the owner's answer.
 
-Technical choices taken (recommended option, no owner call needed): keep the name `preserve_values`; reach from config, not the key; refuse near-bound text dates on every route instead of computing them on some; keep `sentinel_to_null` separate with casting first; keep generation's plan-time refusal code; no rename of the out-of-core disposition fields.
+### B.3 Review history
 
-## 16. Review round 1
+Codex plan rounds on revisions 7 to 9 (`~/scratch/codex-s5-plan-r1.out` to `-r3.out`):
+- r1 (revision 7): named route and layout gaps; revision 8 added the route-by-fixture table, the stream and head cases, and the transactional abort.
+- r2 (revision 8): the pandas metadata zone restoration, the disjoint `int8` dictionary union in the carried profile, and unaligned `date64` collisions; revision 9 added the metadata fact, the profile widening and the alignment rule.
+- r3 (revision 9): `ArrowDtype` restoration of another unit or zone, the same dictionary union in AUTO's `combine_chunks()` and the legacy collector, a row-sized allocation in the profile widening, AT-V2 pinned on the wrong generator, and a second rendering of the sampled-year rule. Revision 10 answers with Q9 (section 0) and section 4.4c.
+#### B.3.1 Review round 1 (was section 16)
 
 Dennis R1 (`/home/cam/scratch/dennis-drs-plan-r1.md`, on `37cafb29e`): NO-GO, 2 blocker, 3 high, 4 medium, 2 low.
 
@@ -1257,7 +1237,7 @@ Dennis R1 (`/home/cam/scratch/dennis-drs-plan-r1.md`, on `37cafb29e`): NO-GO, 2 
 | 10 | AT-F3 undecidable; `profiling/_distributions.py:105` | AT-F3 asserts both functions count the far value on calendar dates; `_distributions.py:105` added to row M and 10.2 |
 | 11 | `replaced_by=None` without the registry citation | 4.3 and section 8 cite `reasons/_registry.py:202-209` and `CONTRIBUTING.md:58` |
 
-## 17. Review round 2
+#### B.3.2 Review round 2 (was section 17)
 
 | Finding | Class | Fix and verification |
 |---|---|---|
@@ -1272,7 +1252,7 @@ Dennis R1 (`/home/cam/scratch/dennis-drs-plan-r1.md`, on `37cafb29e`): NO-GO, 2 
 | L1 | V2-LOG | Section 4.2 refuses deep copy and pickle. The section 4.4 sentry covers deepcopy. |
 | L2 | V2-LOG | The native ns invariant covers text and tz only. AT-R7 explicitly forces and verifies chunking. |
 
-### 17.1 Review of section 4.4b
+#### B.3.3 Review of section 4.4b (was 17.1)
 
 This review covers the revision 4 text of section 4.4b (items 1 to 7, repair and buffer ownership). Revision 5 replaces that text; the rows below are history. Section 17.2 records the redesign.
 
@@ -1296,7 +1276,7 @@ Dennis on `6e9e65664` (`~/scratch/dennis-s5-plan-4-4b-r1.md`): GO-WITH-FIXES, 2 
 | Not verified: pyarrow 14 walker | probed on 14.0.2 (4.4b item 2) |
 | Not verified: ISO, SEQ and isolated-dispatch binding | traced in 4.4b "Where the binding runs" |
 
-#### Codex review of `5e65076c6` against `2fab8cb9f`
+##### Codex review of `5e65076c6` against `2fab8cb9f`
 
 Dennis’s two GO reviews and the decisions above stand. Q6 remains open with A as the written default.
 Round-two cases 1–4 and 6 close at type admission. Case 5 also needs the pandas working representation. Case 7 uses the bound mapping key. The following entries cover the remaining contract, wiring and fixture changes.
@@ -1319,7 +1299,7 @@ Round-two cases 1–4 and 6 close at type admission. Case 5 also needs the panda
 
 Own plan review: **GO under Q6(A)**. The tests and mutations specify the builder’s required evidence. During this plan revision, direct probes on 14.0.2 and 24.0.0 confirmed the excluded word in reopened IPC and the zero-row-group projection for populated and empty files, including a selected struct child. The reference engine import reproduced the missing predicate on 14.0.2. Run each mutation independently on the final implementation head, record its failing assertion, revert and verify green. The plan review does not certify an implementation.
 
-## 17.2 S5 build review rounds 3 to 6 (revision 5)
+#### B.3.4 S5 build review rounds 3 to 6 (was 17.2)
 
 The S5 build (PR #839, `feat/date-range-s5`, head `a5da43ef9`) went through Codex rounds 3 to 6 without a GO. Section
 4.4b records the finding classes. The plan response is the redesign in section 4.4b: S5 refuses and never rewrites,
@@ -1328,7 +1308,7 @@ ASSEMBLER-LABELS and DEP-FLOOR. The round 6 DESIGN finding (the inline `<= 40` s
 `_STOP_AT = 40`, registered in the bound registry at its current value. The fitted distribution admission (S5b) had no
 open finding after round 6 and is ported as it is.
 
-## 17.3 Dennis plan review round 1 of revision 5 (revision 6)
+#### B.3.5 Dennis plan review round 1 of revision 5 (was 17.3)
 
 Dennis reviewed `15ff9e33f` (`~/scratch/dennis-s5-plan-r1.md`): GO-WITH-FIXES, 0 BLOCKER, 2 HIGH, 4 MEDIUM, 3 LOW. Fixes in revision 6:
 
@@ -1344,20 +1324,7 @@ Dennis reviewed `15ff9e33f` (`~/scratch/dennis-s5-plan-r1.md`): GO-WITH-FIXES, 0
 | L2 memory | pass path tests dictionary entries only and never decodes rows; AT-V15 allocation bound; M-55 |
 | L3 stale anchors; `test_signed_evidence_file_access.py` unplaced | cloud anchors `:272`, `:394`; the file is discarded (its count change followed `read_table_gated`) |
 
-## 18. Follow-ups (not in this row)
 
-- G-2: compute text dates on the Python calendar after the pandas parse, which would widen the text domain to the typed one.
-- G-3: shuffle over `timestamp[ns]` returns `timestamp[us]` on full_frame.
-- G-4: CLI hint for `date_outside_strategy_range`, and `decoy scan` suggesting `preserve_values` from the pre-scan sentinel flags.
-- G-5: compile check order differs between the chunked and full-frame paths for a naive timestamp with `preserve_values`.
-- G-7: CLI test for `--chunked` CSV staging with a refusing far date (CLI repo).
-- G-8: full support for dates inside list, map, struct, list view, run-end-encoded and dictionary-of-struct columns (section 4.4b); the owner picked Q6 (A). Needs the output-type decision first.
-- G-11: dropped in revision 5 (the bare-statement rule is removed because the check is pure).
-- G-12 (V2-LOG): hidden storage outside a slice is serialized when a caller writes a returned passthrough table to IPC (all types; the caller's own data).
-- G-13: decided in revision 6 (S5a refuses a date dictionary with a null entry on every route); no follow-up.
-- G-14: a Parquet file Arrow cannot decode (null parent in `fixed_size_list<date32>`) fails with Arrow's error before the type refusal (pre-existing).
-- G-15: the resident profile fallback rebuild drops a stored index (pre-existing, S5 round 5).
-- Structure review list: one resolver for the stored index (`execution/pipeline/_source_types.py:45` and `_pandas_meta/_columns.py:26`).
-- G-6: relationship validators read a far output date as unparsed (`validators/_dates.py:71-80`); confirm sentinel rows are skipped, not counted as violations.
+### B.4 Revision 9 section 4.4b
 
-VERDICT: GO
+The full revision 9 text of section 4.4b (rules 1 to 5 with dictionary structure, the two metadata interpretations, the route-by-fixture table of 306 keys, AT-V12 to AT-V20 in their dictionary form, and the S5a port list) is at plan commit `c19c945c9`, lines 241 to 799: `git show c19c945c9:docs/plans/2026-11-27-date-range-sentinel.md | sed -n 241,799p`. Appendix A restores it under Q9 = B.
