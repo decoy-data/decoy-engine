@@ -117,5 +117,5 @@ not scheduled and has no row yet.
 
 Plan section 13 gives the CLI engine-internal-allow target as 7. The baseline has 10 entries: three
 logging and seven `cli/cockpit.py`. The three BD-E4 accessors replace all seven cockpit entries
-(`SCALAR_HANDLERS` alone is five), so the floor by entry count is 3, not 7. This ledger uses 3.
+(`SCALAR_HANDLERS` alone is four), so the floor by entry count is 3, not 7. This ledger uses 3.
 BD-C2 can confirm this when it runs.
