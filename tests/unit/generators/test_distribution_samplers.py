@@ -19,6 +19,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from decoy_engine.contracts.calendar_range import FittedRangeError
 from decoy_engine.generators.columns import ColumnGenerator
 from decoy_engine.generators.derivation import with_table
 
@@ -304,22 +305,20 @@ class TestDatetime:
         assert out.notna().all()
         assert out.dt.tz is None
 
-    def test_year_beyond_max_is_capped_into_bounds(self, cg):
-        # A year_bin far past max must not blow the [min, max] envelope
-        # (F7 OutOfBoundsDatetime guard): rows land at ts_max.year.
+    def test_year_beyond_max_is_refused(self, cg):
+        # QA F7 clamped a live bin past max into max's year. S5b refuses it before any draw: a
+        # live bin must lie between the fitted min and max years.
         snap = self._snap(year_bins=[{"year": 2200, "count": 100}])
-        out = cg._generate_distribution_datetime(50, snap, SEED)
-        assert out.notna().all()
-        assert (out <= pd.Timestamp("2024-03-15")).all()
-        assert (out.dt.year == 2024).all()
+        with pytest.raises(FittedRangeError) as caught:
+            cg._generate_distribution_datetime(50, snap, SEED)
+        assert caught.value.prop == "year_bins"
 
-    def test_year_below_min_clamps_to_min(self, cg):
-        # A year entirely below min inverts the clipped window; the defensive
-        # clamp emits ts_min rather than nulls or an out-of-range draw.
+    def test_year_below_min_is_refused(self, cg):
+        # A live bin entirely below min used to put every row on min. It is refused now.
         snap = self._snap(year_bins=[{"year": 2010, "count": 100}])
-        out = cg._generate_distribution_datetime(20, snap, SEED)
-        assert out.notna().all()
-        assert (out == pd.Timestamp("2020-06-01")).all()
+        with pytest.raises(FittedRangeError) as caught:
+            cg._generate_distribution_datetime(20, snap, SEED)
+        assert caught.value.prop == "year_bins"
 
     def test_reads_nested_stats_block(self, cg):
         snap = {
