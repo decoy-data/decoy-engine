@@ -96,7 +96,12 @@ material. Allowed: text derived from the content of a file the principal was all
 parse error quoting a cell, say). Cell values in logs are a separate program.
 
 - Engine messages name a file by `display`, the encoded config position, wherever a strict policy
-  is installed (`fileaccess.shown`). Third-party text that names the file it was handed goes
+  is installed (`fileaccess.shown`). Under the ambient CLI policy `shown` returns the locator with
+  its credentials replaced by `<redacted>` (`safe_output.scan_locator`, the one recognizer: userinfo,
+  non-empty query and fragment, and an authority that is not a host). A secret that sits in the
+  path of a configured locator, such as a capability URL (`https://files.example/s/<token>`), is
+  not detectable as one and stays visible; the third-party form (`LocatorScan.published`) cuts
+  such a value to its origin. Third-party text that names the file it was handed goes
   through `fileaccess.redact_locators`.
 - A `file:` mask secret is a `FileRole.SECRET` read at `global_settings.mask_secret_ref` through
   `fileaccess.read_checked`: the owner-only check (`secret_file_permissions_unsafe`) runs on `fstat`

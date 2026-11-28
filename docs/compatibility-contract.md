@@ -1484,6 +1484,15 @@ index outside an array selects nothing for that branch only. `nested_jsonpath_pa
 longer raised, because no subset target can match a path and its prefix. The engine no longer depends on jsonpath-ng:
 the requirement is removed and `tests/sentry/defects/test_nested_target_choke_point.py` fails on any import of it.
 
+- **Locator display (LOCATOR-CREDS, 2026-11):** `decoy_engine.safe_output` exports `scan_locator`,
+  `LocatorScan` and `LocatorKind` (not the root `__all__`). `scan_locator(text)` is the one decision
+  on whether a file locator carries credentials and what it shows. `LocatorScan.shown` is the input
+  with credential spans replaced by `<redacted>` and no other change; `carries_credentials` is
+  `shown != text`; `published` is the third-party form (origin only, or `None` to withhold). The
+  result for each row of `tests/fixtures/locator_credentials/cases.json` is the contract; the CLI
+  vendors that file by hash. A new row may be added, and an existing row's expected value changes
+  only with a plan delta.
+
 ### 3.5 Disguises
 
 Disguises are dated/versioned specs (`disguises/`, `disguises/loader.py`,
