@@ -26,7 +26,9 @@ import pandas as pd
 
 from decoy_engine import reasons as reason_codes
 from decoy_engine.contracts.distribution_snapshot import (
-    SAMPLED_YEARS_RULE,
+    MAX_SAMPLED_YEAR,
+    MIN_YEAR,
+    WINDOW_YEARS_RULE,
 )
 from decoy_engine.errors import DecoyError
 from decoy_engine.generation import stream as gen_stream
@@ -127,18 +129,20 @@ def _check_histogram(
 
 
 def _check_datetime(table: str, col: dict[str, Any], spec: StatisticalSpec) -> None:
-    from decoy_engine.generation.statistical import names_far_year
-
     buckets = spec.datetime_buckets
     # `_refuse_degenerate` passed, so a missing decode means the stats name a year outside the range.
-    # The live-year rule is the one plan compile applies, so the two routes cannot drift.
-    if buckets is None or names_far_year(spec):
+    # A windowed column keeps the narrower rule it always had: a live bin in 9999 is refused here
+    # although plan compile and `sample_column` now hold it.
+    if buckets is None or any(
+        b.count > 0 and not (b.start_year >= MIN_YEAR and b.end_year <= MAX_SAMPLED_YEAR)
+        for b in buckets
+    ):
         _refuse(
             table,
             col,
             CODE_UNBOUNDED,
             "year_bins",
-            SAMPLED_YEARS_RULE,
+            WINDOW_YEARS_RULE,
         )
     weights = [float(b.count) for b in buckets]
     parsed_bounds: dict[str, datetime] = {}

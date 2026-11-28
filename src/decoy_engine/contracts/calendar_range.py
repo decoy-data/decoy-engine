@@ -6,7 +6,8 @@ strategies and the fitted distribution generator read these names, so the text-d
 stated in one place.
 
 `admit_ns_datetime_snapshot` is the admission the distribution generator runs before any draw:
-the snapshot's min and max must lie in that domain, and (for ordered bounds) every live year bin
+the snapshot's min and max must lie between the exact nanosecond limits (the partial days at both
+ends included, because a profiled `pd.Timestamp.min` or `.max` is a real bound), and (for ordered bounds) every live year bin
 must lie between the min's year and the max's year. It refuses with
 `plan/generation_unbounded_column` and names the property, never a value.
 """
@@ -32,6 +33,12 @@ _EPOCH = date(1970, 1, 1)
 CALENDAR_FIRST_DAY = _EPOCH + timedelta(days=CALENDAR_FIRST_DAY_NUMBER)
 CALENDAR_LAST_DAY = _EPOCH + timedelta(days=CALENDAR_LAST_DAY_NUMBER)
 NS_PER_DAY = 86_400 * 1_000_000_000
+# The exact limits of `datetime64[ns]` (`pd.Timestamp.min` and `.max`), as integers of nanoseconds.
+# A fitted bound may sit on either one, so the fitted admission uses these, not the whole days.
+NS_MIN_NS = -(2**63) + 1
+NS_MAX_NS = 2**63 - 1
+NS_MIN_DATE = _EPOCH + timedelta(days=NS_MIN_NS // NS_PER_DAY)
+NS_MAX_DATE = _EPOCH + timedelta(days=NS_MAX_NS // NS_PER_DAY)
 # Day numbers since 1970-01-01. `NS_END_DAY` is exclusive: the day after the last whole day.
 NS_FIRST_DAY_NUMBER = (NS_FIRST_DAY - _EPOCH).days
 NS_END_DAY_NUMBER = (NS_LAST_DAY - _EPOCH).days + 1
@@ -53,8 +60,8 @@ class FittedRangeError(DecoyError):
         rule = (
             "a live year bin must lie between the fitted min and max years"
             if prop == "year_bins"
-            else f"a fitted datetime must lie in {NS_FIRST_DAY.isoformat()} to "
-            f"{NS_LAST_DAY.isoformat()}"
+            else f"a fitted datetime must lie in {NS_MIN_DATE.isoformat()} to "
+            f"{NS_MAX_DATE.isoformat()}"
         )
         super().__init__(f"[{self.code}] {prop}: {rule}.")
 
@@ -108,13 +115,12 @@ def _ns_since_epoch(text: str) -> int:
 def admit_ns_datetime_snapshot(
     min_iso: str, max_iso: str, live_years: Iterable[int]
 ) -> NsDatetimeAdmission:
-    """Check a fitted datetime's bounds against the whole-day nanosecond domain, and its live years
+    """Check a fitted datetime's bounds against the exact nanosecond limits, and its live years
     against the bounds' years.
 
     `min_iso` and `max_iso` are datetime text. Text that does not parse raises `ValueError` (the
     caller's own unparseable path); text that parses outside the domain raises `FittedRangeError`.
     """
-    first, end = NS_FIRST_DAY_NUMBER * NS_PER_DAY, NS_END_DAY_NUMBER * NS_PER_DAY
     bounds: dict[str, int] = {}
     for prop, text in (("min", min_iso), ("max", max_iso)):
         too_far = False
@@ -126,7 +132,7 @@ def admit_ns_datetime_snapshot(
         except (OutOfBoundsDatetime, OverflowError):
             too_far = True
         # Raised outside the handler: the bound is a data value, so nothing may chain it.
-        if too_far or not first <= bounds[prop] < end:
+        if too_far or not NS_MIN_NS <= bounds[prop] <= NS_MAX_NS:
             raise FittedRangeError(prop=prop)
     # Inverted bounds keep the sampler's own warning and NaT path, so the rule applies only when
     # min <= max. Real fits never trip it (profiling writes min, max and the bins from the same
@@ -146,6 +152,10 @@ __all__ = [
     "NS_FIRST_DAY",
     "NS_FIRST_DAY_NUMBER",
     "NS_LAST_DAY",
+    "NS_MAX_DATE",
+    "NS_MAX_NS",
+    "NS_MIN_DATE",
+    "NS_MIN_NS",
     "NS_PER_DAY",
     "FittedRangeError",
     "NsDatetimeAdmission",

@@ -24,7 +24,7 @@ SEED = 20261127
 CODE = reasons.plan.GENERATION_UNBOUNDED_COLUMN
 
 BOUND_TEXT = (
-    "[generation_unbounded_column] {prop}: a fitted datetime must lie in 1677-09-22 to 2262-04-10."
+    "[generation_unbounded_column] {prop}: a fitted datetime must lie in 1677-09-21 to 2262-04-11."
 )
 BIN_TEXT = (
     "[generation_unbounded_column] year_bins: a live year bin must lie between the fitted "

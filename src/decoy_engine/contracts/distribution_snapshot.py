@@ -27,11 +27,15 @@ SCHEMA_VERSION_V2 = "distribution-snapshot/v2"
 ACCEPTED_SCHEMA_VERSIONS = (SCHEMA_VERSION_V1, SCHEMA_VERSION_V2)
 
 # The years a datetime bucket may name. `datetime(year + 1, 1, 1)` must be representable, so the top
-# is 9998. A multi-year range outside it is refused at decode whatever its count.
+# of a multi-year range is 9998; it is refused at decode whatever its count.
 MIN_YEAR = 1
 MAX_SAMPLED_YEAR = 9998
-# The one rendering of that rule, for every refusal that names it.
-SAMPLED_YEARS_RULE = f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}"
+# A one-year bin may name the final calendar year: the sampler takes its end as the last instant of
+# 9999, so the plan-compile rule runs to it. Window admission keeps the narrower 9998 rule.
+MAX_BIN_YEAR = 9999
+# The two renderings of those rules, for every refusal that names them.
+SAMPLED_YEARS_RULE = f"sampled years must lie in {MIN_YEAR}..{MAX_BIN_YEAR}"
+WINDOW_YEARS_RULE = f"sampled years must lie in {MIN_YEAR}..{MAX_SAMPLED_YEAR}"
 
 
 @dataclass(frozen=True)

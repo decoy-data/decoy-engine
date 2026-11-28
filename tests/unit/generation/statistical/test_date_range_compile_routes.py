@@ -120,7 +120,7 @@ def test_sample_column_refuses_before_any_draw() -> None:
     with pytest.raises(StatisticalSpecError) as caught:
         sample_column(_spec(FAR_BIN), 5, col_seed=7)
     assert caught.value.code == CODE
-    assert "9999" not in str(caught.value)
+    assert "10000" not in str(caught.value)
 
 
 def _compile_config(tmp_path: Path) -> dict[str, Any]:
@@ -219,11 +219,7 @@ def test_a_config_distribution_column_never_reaches_the_fitted_datetime_sampler(
 def test_a_profiled_9999_12_31_second_sentinel_compiles_and_samples(tmp_path: Path) -> None:
     """Profiler-written snapshot, as on main: the live 9999 bin compiles and gives rows."""
     frame = pd.DataFrame(
-        {
-            "when": np.array(
-                ["2020-04-01"] * 1000 + ["9999-12-31"], dtype="datetime64[s]"
-            )
-        }
+        {"when": np.array(["2020-04-01"] * 1000 + ["9999-12-31"], dtype="datetime64[s]")}
     )
     snap = distribution_snapshot_document(frame, include_values=True)
     path = tmp_path / "snapshot.json"

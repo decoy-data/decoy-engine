@@ -16,6 +16,8 @@ import pandas as pd
 from decoy_engine.contracts.calendar_range import (
     NS_END_DAY_NUMBER,
     NS_FIRST_DAY_NUMBER,
+    NS_MAX_NS,
+    NS_MIN_NS,
     NS_PER_DAY,
     admit_ns_datetime_snapshot,
 )
@@ -394,14 +396,18 @@ class _DistributionMixin:
         ends = np.asarray([f"{y + 1:04d}-01-01" for y in years_arr], dtype="datetime64[D]")
         start_days = np.clip(starts.astype(np.int64), NS_FIRST_DAY_NUMBER, NS_END_DAY_NUMBER)
         end_days = np.clip(ends.astype(np.int64), NS_FIRST_DAY_NUMBER, NS_END_DAY_NUMBER)
-        lo_ns = np.maximum(start_days * NS_PER_DAY, ts_min_ns)
-        hi_ns = np.minimum(end_days * NS_PER_DAY, ts_max_ns)
+        # A year that reaches past an end of the domain takes that end's exact limit, so the
+        # partial days at 1677-09-21 and 2262-04-11 stay reachable. Clipped days never overflow.
+        start_ns = np.where(start_days <= NS_FIRST_DAY_NUMBER, NS_MIN_NS, start_days * NS_PER_DAY)
+        end_ns = np.where(end_days >= NS_END_DAY_NUMBER, NS_MAX_NS, end_days * NS_PER_DAY)
+        lo_ns = np.maximum(start_ns, ts_min_ns)
+        hi_ns = np.minimum(end_ns, ts_max_ns)
         # A clipped window can be inverted when the chosen year sits entirely outside
         # [min, max] (a snapshot integrity bug): clamp to the window start so a plausible value
         # is emitted rather than nulls or an out-of-range draw.
         bad = hi_ns <= lo_ns
         if bad.any():
-            hi_ns = np.where(bad, lo_ns + 1, hi_ns)
+            hi_ns = np.where(bad, lo_ns, hi_ns)
         rand_floats = rng.random(size=num_rows)
         offsets = (rand_floats * (hi_ns - lo_ns)).astype(np.int64)
         sample_ns = lo_ns + offsets
