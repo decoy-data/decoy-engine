@@ -76,9 +76,20 @@ on the row number, never on the source value. In both modes a null source stays 
   The output column has that type.
 
 A namespace may not contain `/computed:`; the engine adds that suffix to keep
-these draws apart from pool draws in the same namespace. Computed providers run
-the whole frame: they are outside the chunked and out-of-core faker allowlists, so
-a forced out-of-core run refuses them and an auto-routed job runs the whole frame.
+these draws apart from pool draws in the same namespace.
+
+A draw whose output is exact `string` (`uuid`, and `random_choice` over strings) also
+runs on the sequential route's kernels, and on the out-of-core route when it is
+deterministic and its source is a string. The values equal the whole-frame run.
+`random_int_range` and a `random_choice` over numbers or booleans do not take those
+routes, because their output is not a string: sequential masks them on the whole
+frame, auto routing falls through to the whole frame, and a forced out-of-core run
+refuses them before it writes anything
+(`out_of_core_faker_computed_output_type_unsupported`). The chunked and unified
+routes do not run computed draws; an auto-routed job runs the whole frame.
+
+`lorem_text` builds a pool of Faker paragraphs and runs like the other pool providers.
+`address_full` is still refused at compile.
 
 ### hash
 

@@ -516,21 +516,17 @@ class TestNewlyCertifiedPairNoLongerV1Frozen:
         n = _faker_pool.N_THRESHOLD + 50
         assert _v2_run(col, n) == _v1_run(col, n)
 
-    def test_list_locale_new_type_declines_to_per_row_above_threshold(self):
-        import pytest
+    def test_list_locale_new_type_declines_to_per_row_above_threshold(self, monkeypatch):
+        """A locale LIST is not a certified (type, str-locale) pair, so pooling declines and the
+        column runs per row.
 
+        This used to rely on Faker's multi-locale proxy raising NotImplementedError as the proof
+        that pooling did not engage. That limitation is gone since GEN-STREAM-ALL S1a, so the
+        proof is direct: the gate declines, no pooled instance is built, and the per-row run
+        still completes with string values that repeat for a repeated seed.
+        """
         from decoy_engine.generation import _faker_pool
 
-        # A locale LIST is not a certified (type, str-locale) pair (the pooled
-        # pairs are keyed on single string locales), so pool_eligible declines
-        # and the column takes the UNCHANGED per-row path end-to-end. For a
-        # multi-locale Faker column that path hits Faker's own multi-locale
-        # limitation, exactly as it did pre-slice. The raise is the proof that
-        # pooling did NOT engage: the pooled path builds one seeded instance and
-        # would neither call the provider per row nor raise here. (A direct
-        # _v1_run==_v2_run comparison is not the right check for THIS edge -- the
-        # V1 ColumnGenerator and v2 compile_and_generate entry points already
-        # diverge on multi-locale independent of pooling.)
         col = {
             "name": "fn",
             "type": "faker",
@@ -538,8 +534,31 @@ class TestNewlyCertifiedPairNoLongerV1Frozen:
             "locale": ["en_US", "de_DE"],
         }
         n = _faker_pool.N_THRESHOLD + 50
-        with pytest.raises(NotImplementedError):
-            _v2_run(col, n)
+        assert (
+            _faker_pool.pool_eligible("first_name_female", col["locale"], n, opted_out=False)
+            is False
+        )
+
+        built: list[str] = []
+        real_open = _faker_pool.open_pooled_selector
+        real_init = _faker_pool.PooledSelector.__init__
+
+        def open_spy(**kwargs):
+            built.append("open")
+            return real_open(**kwargs)
+
+        def init_spy(self, *args, **kwargs):
+            built.append("init")
+            real_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(_faker_pool, "open_pooled_selector", open_spy)
+        monkeypatch.setattr(_faker_pool.PooledSelector, "__init__", init_spy)
+
+        first = _v2_run(col, n)
+        assert built == []
+        assert len(first) == n
+        assert all(isinstance(v, str) for v in first)
+        assert _v2_run(col, n) == first
 
     def test_opted_out_certified_pair_stays_v1_frozen_above_threshold(self):
         from decoy_engine.generation import _faker_pool

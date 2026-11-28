@@ -11,8 +11,8 @@ import pytest
 
 from decoy_engine import run_pipeline
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline import _post_scan
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.verification.postmask import SCHEMA_VERSION, PostScanBlockedError
 from tests.unit.execution import _subset_run_support as subset_sup
 from tests.unit.execution.post_scan.test_wiring import _blocked, _config, _fail_row, _run

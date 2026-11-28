@@ -14,6 +14,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `progress.py`, `_progress_events.py` | Progress contract: `ProgressSink`, the channel, value-free versioned events (`_progress_events.py` holds the event types and serializers), `use_progress` |
 | `_canonical/` | The one canonical JSON owner: `canonical_json_bytes` (digests) and `seed_fingerprint_bytes` (the frozen seed form); `_strict_spec.py` holds the strict persisted-reader specs the publication descriptor and the resume records share |
 | `_capacity/` | `unique_capacity_ok`, the one UNIQUE domain-versus-rows rule config and generation both read |
+| `_config_text/` | Config refusal text foundation: `config_refusal` builds the text and `path` key of every loader refusal from a position, a closed problem and a closed expected type, and `read_config` turns a read or parse failure into one. A sub-package because the engine root is at its fan-out cap and `safe_output` imports pyarrow |
 | `_duckdb_read/` | The one reader of a single DuckDB row (`fetch_row`, `fetch_scalar`); drains the result so DuckDB 2.x can register again |
 | `_nested_json/` | Nested JSON cell foundation: `nested_children` (`_rules.py`), the one reader of a nested column's child strategy and config, used by the plan checks, the secret requirements, column access, the multi-table runner and the nested handler |
 | `reasons/` | The versioned reason-code registry (`ReasonSpec`, `ReasonRecord`, one catalog module per namespace) |
@@ -43,6 +44,7 @@ sentry (`tests/sentry/test_package_map_paths.py`) asserts every path here exists
 | `subset/` | FK-aware subsetting (preflight, plan, run) |
 | `delivery/` | Delivery planning: `plan_delivery` decides which tables become visible together (strict or best-effort) from the table-level dependency graph; `resume/` holds the run fingerprint a resume store is tied to, the two store records (`decoy-resume-run/v1`, `decoy-resume-table/v1`) and `plan_resume`, the keep or rerun decision |
 | `providers_v2/`, `providers.py` | Provider registry and identifier adapters |
+| `arrow_frames.py` | Public experimental Arrow-to-pandas conversion names (wraps `internal/pandas_compat`) |
 | `identifiers.py`, `checksums.py`, `codesets/`, `reference_tables/` | Identifier families, check digits, code corpora, reference datasets |
 | `disguises/` | Compliance disguise bundles |
 | `determinism/`, `keyprovider.py`, `_reference_date.py` | Seed protocol, key derivation, reference-date anchoring |

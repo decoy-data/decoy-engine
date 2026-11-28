@@ -35,16 +35,16 @@ from decoy_engine.detection.types import (
 
 
 def canonical_detectors(value: tuple[DetectorSource, ...]) -> tuple[DetectorSource, ...]:
-    """`regex` present, no duplicates, in the canonical order (dumps and hashes stay stable)."""
+    """No duplicates, `regex` always present, in the canonical order (dumps and hashes stay stable).
+
+    Regex always runs, so a list without it is completed rather than refused. This is the one
+    place that adds it."""
     if len(set(value)) != len(value):
         raise PydanticCustomError(
             str(reasons.config.DETECTORS_INVALID), "detectors must not repeat a source."
         )
-    if "regex" not in value:
-        raise PydanticCustomError(
-            str(reasons.config.DETECTORS_INVALID), "detectors must include regex."
-        )
-    return tuple(source for source in DETECTOR_ORDER if source in value)
+    chosen = {*value, "regex"}
+    return tuple(source for source in DETECTOR_ORDER if source in chosen)
 
 
 def checked_ner_model(value: Any) -> str:

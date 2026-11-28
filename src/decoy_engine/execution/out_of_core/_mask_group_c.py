@@ -81,12 +81,14 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.detection.detectors import Span
 from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._adapter import provider_config_to_dict
 from decoy_engine.execution._errors import (
     ExecutionError,
     StrategyError,
+    text_mask_fail_closed_error,
     text_mask_unsupported_pair_error,
 )
 from decoy_engine.execution._strategies._code_set import _PER_VALUE_CODE_SET_ERRORS
@@ -96,10 +98,12 @@ from decoy_engine.execution._strategies._ner_config import (
 )
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
+from decoy_engine.internal.pandas_compat import arrow_to_series
 from decoy_engine.kernel._code_set import code_set_map
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.bucket_perturb import (
+    BUCKET_PERTURB_INVALID_CONFIG_TEXT,
     apply_bucket_perturb,
     validate_bucket_perturb_config,
 )
@@ -283,17 +287,7 @@ def _text_mask_array(
                 raise
             unsupported = True
         except FpeUnencryptableError as exc:
-            # Matches the full-frame handler's fail-closed mapping
-            # (`_strategies/_text_mask.TextMaskHandler.run`) so a consumer keying
-            # on `StrategyError.code` sees an identical event on both routes.
-            raise StrategyError(
-                code=reasons.runtime.FPE_UNENCRYPTABLE_DOMAIN,
-                strategy="text_mask",
-                message=(
-                    f"column {column!r}: {exc}. The engine fails closed rather than "
-                    "silently choose a sub_floor_span fallback."
-                ),
-            ) from exc
+            raise text_mask_fail_closed_error(column) from exc
         if unsupported:
             # Raised after the catch closed, so no cause or context carries the span.
             raise text_mask_unsupported_pair_error(column)
@@ -439,7 +433,7 @@ def _bucket_perturb_array(
             raise StrategyError(
                 code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
                 strategy="bucket_perturb",
-                message=str(exc),
+                message=BUCKET_PERTURB_INVALID_CONFIG_TEXT,
             ) from exc
         date_format: str | None = cfg.get("date_format") or None
         if date_format is None:
@@ -519,7 +513,7 @@ def group_c_output_type(seed: ColumnSeed, cfg: dict[str, Any]) -> pa.DataType:
             raise StrategyError(
                 code=reasons.runtime.BUCKET_PERTURB_INVALID_CONFIG,
                 strategy="bucket_perturb",
-                message=str(exc),
+                message=BUCKET_PERTURB_INVALID_CONFIG_TEXT,
             ) from exc
     return pa.string()
 
@@ -534,7 +528,7 @@ def _to_series(values: pa.Array | pa.ChunkedArray) -> pd.Series:
     """
     if isinstance(values, pa.ChunkedArray):
         values = values.combine_chunks()
-    return values.to_pandas()
+    return arrow_to_series(values, on_unrepresentable=source_column_unrepresentable())
 
 
 __all__ = [

@@ -174,8 +174,8 @@ from decoy_engine.execution._transactional_sink import (
     TransactionalSink,
     _CallableSinkAdapter,
 )
-from decoy_engine.execution.pipeline._post_scan import note_quarantined, publish_after_gate
 from decoy_engine.execution.pipeline._source_types import table_from_pandas_keeping_source_types
+from decoy_engine.execution.pipeline.post_scan import note_quarantined, publish_after_gate
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool._cache import PoolCache
 from decoy_engine.generation.pool._events import QualityWarning
@@ -336,7 +336,7 @@ def run_sequential(
     cache = pool_cache if pool_cache is not None else PoolCache()
     # D2a: per-run hash decisions, kept for the whole run so REMAP on a child table still sees
     # its parent's decision after the parent frame is evicted.
-    native_run = SeqNativeRun(native_threads=native_threads)
+    native_run = SeqNativeRun(native_threads=native_threads, registry=registry)
     ctx = StrategyContext(
         registry=registry,
         pool_cache=cache,
@@ -417,7 +417,7 @@ def run_sequential(
                 # silently widens to float64 on this table-at-a-time load either.
                 # HC-3a P1 #2: date_shift group_by anchor columns get the same
                 # lossless int+null path (union into the FK-safe set).
-                df = to_pandas_fk_safe(src, lossless.for_table(table, src))
+                df = to_pandas_fk_safe(src, lossless.for_table(table, src), table_name=table)
                 conversion_ms += (time.perf_counter() - t0) * 1000.0
                 frames[table] = df
                 register_exact_int_sources(ctx, table, src, df, nodes_by_table.get(table, ()))
@@ -429,7 +429,7 @@ def run_sequential(
                 )
 
                 faker_pin = deterministic_faker_pin_columns_from_plan(
-                    plan, table, src.schema, relationship_graph=graph
+                    plan, table, src.schema, relationship_graph=graph, registry=registry
                 )
                 # `src` stays until the output is assembled: untouched columns are written from it.
 

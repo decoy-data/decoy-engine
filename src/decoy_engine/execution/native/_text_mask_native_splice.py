@@ -36,6 +36,7 @@ from decoy_engine.execution.native._text_redact_kernel import (
     CATALOG_VERSION,
     SUPPORTED_IDS,
     TextRedactKernel,
+    companion_compat,
     merge_text_redact_spans,
 )
 from decoy_engine.transforms._text_mask_splice import warn_passthrough_unmatched
@@ -59,16 +60,14 @@ class SpliceKernel:
 
 
 def load_splice_kernel() -> SpliceKernel | None:
-    """The companion's splice symbols, or None (absent or an older build) to keep slice a."""
-    try:
-        from decoy_engine_native import _kernel
-    except Exception:
+    """The checked legacy splice pair, or None (absent, older build or failed check) for slice a.
+
+    Reads the one bound compatibility decision, so it never reopens the companion.
+    """
+    pair = companion_compat().legacy
+    if pair is None:
         return None
-    splice_spans = getattr(_kernel, "text_mask_splice_spans", None)
-    detect_splice = getattr(_kernel, "text_mask_detect_splice", None)
-    if splice_spans is None or detect_splice is None:
-        return None
-    return SpliceKernel(splice_spans, detect_splice)
+    return SpliceKernel(splice_spans=pair[0], detect_splice=pair[1])
 
 
 @dataclass(frozen=True)

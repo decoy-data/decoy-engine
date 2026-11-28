@@ -121,7 +121,7 @@ class TestPoolableSubset:
         assert "person_email" in poolable_subset
         assert "address_zip" in poolable_subset
         assert "synthetic_member_id" in poolable_subset  # still Faker-bound
-        assert "lorem_text" not in poolable_subset
+        assert "lorem_text" in poolable_subset  # GEN-NONFAKER-DRAWS: a pool of paragraphs
         assert "uuid" not in poolable_subset
         assert "random_int_range" not in poolable_subset
         assert "address_full" not in poolable_subset

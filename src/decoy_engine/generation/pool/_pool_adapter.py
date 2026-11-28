@@ -175,6 +175,11 @@ class PoolAdapter:
         per S4 spec §2: 'generate_batch has no per-row source value to key on')."""
         return self._wrapped.generate_batch(provider, spec=spec, count=count)
 
+    def serving_adapter(self, locale: str | None) -> BackendAdapter:
+        """The adapter that draws a batch for `locale`: the wrapped one, which `generate_batch`
+        forwards to. Admission follows this to see which backend a pool build reaches."""
+        return self._wrapped
+
     def capability_matrix(self, provider: str) -> CapabilityMatrix:
         """Return wrapped capability matrix with `supports_deterministic`
         boosted to True for poolable providers + `backend_type` set to "pool".

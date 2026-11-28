@@ -69,6 +69,7 @@ __all__ = [
     "OUT_OF_CORE_CODE_SET_SHAPE_UNSUPPORTED",
     "OUT_OF_CORE_CONCURRENCY_INVALID",
     "OUT_OF_CORE_FAKER_COLUMN_MISSING",
+    "OUT_OF_CORE_FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED",
     "OUT_OF_CORE_FAKER_INDEX_UNAVAILABLE",
     "OUT_OF_CORE_FAKER_POOL_BUDGET_EXCEEDED",
     "OUT_OF_CORE_FAKER_POOL_BUDGET_INVALID",
@@ -108,9 +109,13 @@ __all__ = [
     "OUT_OF_CORE_REORDER_HEAD_FIT_INVALID",
     "POOL_SIZE_INVALID",
     "POOL_SIZE_OVERFLOW",
+    "POSTMASK_COLUMN_NOT_INSPECTABLE",
+    "POSTMASK_SOURCE_LENGTH_MISMATCH",
+    "POST_SCAN_COLUMN_NOT_INSPECTABLE",
     "SEED_WRONG_LENGTH",
     "SITE_NOT_PARTITIONABLE",
     "SITE_NOT_REPRODUCIBLE",
+    "SOURCE_COLUMN_UNREPRESENTABLE",
     "VAULT_REQUIRES_RESIDENT_OUTPUT",
 ]
 
@@ -305,6 +310,11 @@ OUT_OF_CORE_FAKER_POOL_BUDGET_INVALID = _d(
 OUT_OF_CORE_FAKER_POOL_SIZE_INVALID = _d(
     "out_of_core_faker_pool_size_invalid", "Out of core Faker pool size invalid."
 )
+OUT_OF_CORE_FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED = _d(
+    "out_of_core_faker_computed_output_type_unsupported",
+    "Out of core Faker computed output type unsupported.",
+    since=UNRELEASED,
+)
 OUT_OF_CORE_FAKER_POOL_UNSUPPORTED = _d(
     "out_of_core_faker_pool_unsupported", "Out of core Faker pool unsupported."
 )
@@ -401,4 +411,25 @@ OUT_OF_CORE_REORDER_FAN_IN_INVALID = _d(
 )
 OUT_OF_CORE_REORDER_HEAD_FIT_INVALID = _d(
     "out_of_core_reorder_head_fit_invalid", "Out of core reorder head fit invalid."
+)
+POSTMASK_COLUMN_NOT_INSPECTABLE = _d(
+    "postmask_column_not_inspectable",
+    "A column holds a value pandas cannot represent, so the post-mask check could not inspect it.",
+    since=UNRELEASED,
+)
+POSTMASK_SOURCE_LENGTH_MISMATCH = _d(
+    "postmask_source_length_mismatch",
+    "The source and output row streams differ in length, so the post-mask check could not "
+    "compare them row by row.",
+    since=UNRELEASED,
+)
+POST_SCAN_COLUMN_NOT_INSPECTABLE = _d(
+    "post_scan_column_not_inspectable",
+    "A column holds a value pandas cannot represent, so the post-scan check could not inspect it.",
+    since=UNRELEASED,
+)
+SOURCE_COLUMN_UNREPRESENTABLE = _d(
+    "source_column_unrepresentable",
+    "A source column holds a value pandas cannot represent.",
+    since=UNRELEASED,
 )

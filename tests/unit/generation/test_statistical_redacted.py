@@ -159,10 +159,15 @@ class _Name:
         return "full_name"
 
 
-def test_a_non_string_condition_on_that_names_a_redacted_column_is_refused(build: Build) -> None:
+def test_a_non_string_condition_on_is_refused_as_mistyped_not_converted(build: Build) -> None:
+    # F31 AE5 plan (A9, N27): a non-string `condition_on` is refused by kind before anything reads
+    # it, so `str()` of the object never decides which column it names.
     snap = build()
-    err = _refused(snap, _cfg("status", condition_on=_Name(), allow_real_categories=True))
-    assert "'full_name'" in err.message
+    with pytest.raises(StatisticalSpecError) as exc:
+        load_spec(_cfg("status", condition_on=_Name(), allow_real_categories=True), snapshot=snap)
+    assert exc.value.code == "statistical_joint_missing"
+    assert "condition_on" in exc.value.message
+    assert "full_name" not in exc.value.message
 
 
 def test_a_redacted_hc5_column_gets_this_code_not_the_hc5_one(build: Build) -> None:

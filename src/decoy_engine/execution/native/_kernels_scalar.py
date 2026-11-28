@@ -363,7 +363,7 @@ def native_text_mask(
                 raise
             unsupported = True
         except FpeUnencryptableError as exc:
-            raise text_mask_fail_closed_error(exc, column) from exc
+            raise text_mask_fail_closed_error(column) from exc
         if unsupported:
             # Raised after the catch closed, so no cause or context carries the span.
             raise text_mask_unsupported_pair_error(column)

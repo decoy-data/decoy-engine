@@ -693,7 +693,10 @@ class TestChunkedRouting:
 
     @pytest.mark.parametrize("provider", ["uuid", "random_int_range", "random_choice"])
     def test_the_native_admission_declines_a_computed_provider_by_name(self, provider) -> None:
-        """Why auto routing falls through: the native faker allowlist has no computed provider."""
+        """Why auto routing falls through: the chunked faker allowlist has no computed provider.
+
+        A draw whose output is not exact `string` gets the typed reason (E13) instead, since no
+        string-tokenizing route could carry it whatever its admission grows into."""
         from decoy_engine.execution.native._dispatch import NodeRouteRecord
         from decoy_engine.execution.native._real_type_admission import real_type_decline
         from decoy_engine.execution.native._route_decline_codes import (
@@ -709,6 +712,12 @@ class TestChunkedRouting:
             cfg, node, pa.schema([("f", pa.string())]), table=TABLE, profile=None
         )
         assert found is not None
+        if provider == "random_int_range":
+            assert found.record == column_decline(
+                RouteDeclineCode.FAKER_COMPUTED_OUTPUT_TYPE_UNSUPPORTED, TABLE, "f"
+            )
+            assert found.reason == "faker_computed_output_type_unsupported:f:random_int_range"
+            return
         assert found.record == column_decline(
             RouteDeclineCode.FAKER_PROVIDER_NOT_NATIVE, TABLE, "f"
         )
@@ -858,16 +867,12 @@ class TestRelationshipRoutes:
         assert all(UUID_V4.match(v) for v in parent_ids) and len(set(parent_ids)) == self.N
         assert child_pids == [parent_ids[i % self.N] for i in range(self.N * 2)]
 
-    def test_forced_out_of_core_refuses_a_computed_column(self, tmp_path: Path) -> None:
+    def test_forced_out_of_core_refuses_a_non_deterministic_computed_column(
+        self, tmp_path: Path
+    ) -> None:
         from decoy_engine import ConfigError
 
-        column = {
-            "name": "f",
-            "strategy": "faker",
-            "provider": "uuid",
-            "deterministic": True,
-            "namespace": "fns",
-        }
+        column = {"name": "f", "strategy": "faker", "provider": "uuid", "deterministic": False}
         cfg = self._config(tmp_path, key_provider_name=None, column=column)
         with pytest.raises(ConfigError, match="out_of_core_faker_pool_unsupported"):
             self._run(cfg, execution_mode="out_of_core")

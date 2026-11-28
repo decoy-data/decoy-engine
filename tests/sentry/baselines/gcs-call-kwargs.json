@@ -92,17 +92,11 @@
     "decoy_engine/execution/_pipeline_finalize.py::_filter_sampled_values_source_equality::update::0": {
       "reason": "set.update on a set held in a dict of sets"
     },
-    "decoy_engine/execution/_pipeline_generate_mask.py::run_generate_and_mask_steps::open::0": {
-      "reason": "chunked OutputPublish.open, not a GCS Blob"
-    },
     "decoy_engine/execution/_pipeline_generate_mask.py::run_generate_and_mask_steps::update::0": {
       "reason": "dict.update on a plain dict"
     },
     "decoy_engine/execution/_pipeline_generate_mask.py::run_generate_and_mask_steps::update::1": {
       "reason": "dict.update on a plain dict"
-    },
-    "decoy_engine/execution/_pipeline_mixed_route.py::_run_admitted::open::0": {
-      "reason": "chunked OutputPublish.open, not a GCS Blob"
     },
     "decoy_engine/execution/_pipeline_mixed_route.py::_run_admitted::update::0": {
       "reason": "dict.update on a plain dict"
@@ -261,9 +255,6 @@
     },
     "decoy_engine/fileaccess/_reclaim.py::_push_dir::open::0": {
       "reason": "os.open on a local path, not a GCS Blob"
-    },
-    "decoy_engine/generation/_streamed.py::run_generation::open::0": {
-      "reason": "chunked OutputPublish.open, not a GCS Blob"
     },
     "decoy_engine/generation/composite/_city_state_zip.py::load_locality_table::open::0": {
       "reason": "pathlib Path.open on a packaged CSV"

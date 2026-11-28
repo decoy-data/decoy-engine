@@ -35,14 +35,7 @@ REPO = Path(__file__).parents[2]
 
 # Deprecations that are deliberately permanent (not shims), keyed by
 # (path relative to repo, enclosing function name) -> rationale.
-PERMANENT: dict[tuple[str, str], str] = {
-    (
-        "src/decoy_engine/internal/crypto.py",
-        "deterministic_hash",
-    ): "Permanent legacy fallback used when no master key is configured; the "
-    "DeprecationWarning steers new code to hmac_hex but the function is not "
-    "slated for removal. Not a time-boxed shim.",
-}
+PERMANENT: dict[tuple[str, str], str] = {}
 
 _REMOVAL_MARKER = re.compile(
     r"(?i)(\bremov(e|ed|al)\b\s*[:=])"  # "Removal:" / "remove ="

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal, NamedTuple
 
 from decoy_engine import reasons
-from decoy_engine.config import classify_table_kinds, final_bindings, parse_ops
+from decoy_engine.config import PreScanConfig, classify_table_kinds, final_bindings, parse_ops
 from decoy_engine.errors import DecoyError
 from decoy_engine.run_result import Check, CheckCounts
 
@@ -145,7 +145,8 @@ class PreScanFailedError(DecoyError, RuntimeError):
 
 
 def _effective_detectors(policy: Mapping[str, Any]) -> tuple[str, ...]:
-    return tuple(sorted({*(policy.get("detectors") or ()), "regex"}))
+    # The config model owns "regex is always on"; the sort keeps `PreScanVerdict.detectors` sorted.
+    return tuple(sorted(PreScanConfig(detectors=tuple(policy.get("detectors") or ())).detectors))
 
 
 def _gated(rule: Mapping[str, Any]) -> bool:
