@@ -24,8 +24,10 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine._lexeme import LEXEME_KEY, pandas_lexeme_kwargs
 from decoy_engine.connectors import _clients
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._readers import (
     PROOF_READ_ERRORS,
     ProfileSource,
@@ -267,7 +269,8 @@ class S3ParquetSource:
 
     def to_frame(self) -> pd.DataFrame:
         client = _s3_for(self._descriptor)
-        return pd.read_parquet(io.BytesIO(_s3_full(client, self._bucket, self._key)))
+        table = pq.read_table(io.BytesIO(_s3_full(client, self._bucket, self._key)))
+        return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 class S3CsvSource:
@@ -388,7 +391,8 @@ class GcsParquetSource:
     def to_frame(self) -> pd.DataFrame:
         with _clients.gcs_client() as client:
             data = _clients.gcs_download(_gcs_blob(self._descriptor, client))
-        return pd.read_parquet(io.BytesIO(data))
+        table = pq.read_table(io.BytesIO(data))
+        return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 class GcsCsvSource:

@@ -56,6 +56,7 @@ import pandas as pd
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import full_frame_unrepresentable
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.internal.fk_tokens import (  # noqa: F401  re-exported for every FK route
     NULL_FK_KEY,
@@ -427,7 +428,15 @@ def lossless_int_columns_from_config(
     ).for_table(table, source)
 
 
-def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFrame:
+_FULL_FRAME_NOTE = (
+    " The full-frame pandas route converts every column to pandas; the default native (Rust) "
+    "route keeps columns in Arrow and does not hit this limit."
+)
+
+
+def to_pandas_fk_safe(
+    table: pa.Table, fk_columns: Collection[str], *, table_name: str | None = None
+) -> pd.DataFrame:
     """Convert one Arrow table to pandas, keeping every FK-relevant integer
     column exact.
 
@@ -479,6 +488,7 @@ def to_pandas_fk_safe(table: pa.Table, fk_columns: Collection[str]) -> pd.DataFr
         [col for col in fk_columns if col in table.column_names],
         types_mapper=_exact_fk_types_mapper,
         on_unconvertible=unsupported,
+        on_unrepresentable=full_frame_unrepresentable(table_name, _FULL_FRAME_NOTE),
     )
 
 

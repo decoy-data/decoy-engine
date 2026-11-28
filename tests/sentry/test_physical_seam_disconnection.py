@@ -63,7 +63,7 @@ GUARDED_MODULES: tuple[str, ...] = (
     "execution/_pipeline.py",
     "execution/pipeline/_subset_stage.py",
     # PS-7: the post-scan gate core checks outputs before commit; no physical import.
-    "execution/pipeline/_post_scan.py",
+    "execution/pipeline/post_scan/_gate.py",
     "execution/_pipeline_routing.py",
     "execution/_pipeline_routing_signals.py",
     "execution/_pipeline_chunk_route.py",

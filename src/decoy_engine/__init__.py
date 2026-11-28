@@ -47,6 +47,7 @@ import logging
 # The one NullHandler attach site; `_configure_logger` preserves it and never creates one.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
+from decoy_engine.arrow_frames import arrow_to_frame, arrow_to_frame_pair, arrow_to_series
 from decoy_engine.config import (
     FILE_SOURCE_PATH_FIELDS,
     Dismissal,
@@ -442,6 +443,9 @@ __all__ = [
     "WeakMaskSecret",
     "WriteResult",
     "apply_table_transforms",
+    "arrow_to_frame",
+    "arrow_to_frame_pair",
+    "arrow_to_series",
     "atomic_swap_db_providers",
     "build_namespace_registry",
     "build_relationship_graph",

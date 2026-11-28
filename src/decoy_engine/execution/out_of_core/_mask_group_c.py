@@ -81,6 +81,7 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 
 from decoy_engine import reasons
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.detection.detectors import Span
 from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
 from decoy_engine.execution._adapter import provider_config_to_dict
@@ -97,6 +98,7 @@ from decoy_engine.execution._strategies._ner_config import (
 )
 from decoy_engine.execution.out_of_core._bucket_native import native_bucket_perturb_array
 from decoy_engine.execution.out_of_core._text_mask_native import native_text_mask_array
+from decoy_engine.internal.pandas_compat import arrow_to_series
 from decoy_engine.kernel._code_set import code_set_map
 from decoy_engine.kernel._scalar import _array_to_pylist, _is_missing
 from decoy_engine.plan._errors import PlanCompileError
@@ -526,7 +528,7 @@ def _to_series(values: pa.Array | pa.ChunkedArray) -> pd.Series:
     """
     if isinstance(values, pa.ChunkedArray):
         values = values.combine_chunks()
-    return values.to_pandas()
+    return arrow_to_series(values, on_unrepresentable=source_column_unrepresentable())
 
 
 __all__ = [

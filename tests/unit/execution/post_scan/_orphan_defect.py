@@ -12,7 +12,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 
 
 def install() -> None:
