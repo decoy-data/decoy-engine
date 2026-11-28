@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Problem, at_generate_column, config_position, config_refusal
 from decoy_engine._error_base import raise_bare
 from decoy_engine.config import relationship_shape_error
 from decoy_engine.generation.pool import unique_capacity_ok
@@ -351,21 +352,26 @@ def check_statistical_columns(
             col_name = col_entry.get("name", "?")
             col_type = col_entry.get("type")
             if col_type != "statistical" and "high_cardinality" in col_entry:
-                raise PlanCompileError(
-                    code=reasons.plan.STATISTICAL_HIGH_CARDINALITY_WRONG_TYPE,
-                    path=f"tables.{table_name}.generate_columns.{col_name}.high_cardinality",
-                    message=(
-                        f"generate column {col_name!r}: high_cardinality is only valid "
-                        f"for `type: statistical` columns (got type {col_type!r})."
-                    ),
+                with at_generate_column(table_name, col_name):
+                    refusal = config_refusal(
+                        config_position("high_cardinality"),
+                        Problem.NOT_ALLOWED,
+                        hint="Only statistical columns may set high_cardinality",
+                    )
+                raise_bare(
+                    refusal_error(reasons.plan.STATISTICAL_HIGH_CARDINALITY_WRONG_TYPE, refusal)
                 )
             if col_type == "statistical":
                 snapshot_file = col_entry.get("snapshot_file")
                 if not snapshot_file:
-                    raise PlanCompileError(
-                        code=reasons.plan.STATISTICAL_SNAPSHOT_FILE_REQUIRED,
-                        path=f"tables.{table_name}.generate_columns.{col_name}",
-                        message=f"statistical column {col_name!r} requires `snapshot_file`.",
+                    with at_generate_column(table_name, col_name):
+                        refusal = config_refusal(
+                            config_position("snapshot_file"),
+                            Problem.MISSING,
+                            hint="A statistical column requires snapshot_file",
+                        )
+                    raise_bare(
+                        refusal_error(reasons.plan.STATISTICAL_SNAPSHOT_FILE_REQUIRED, refusal)
                     )
                 snapshot_file = str(snapshot_file)
                 read = pinned.get(snapshot_file)

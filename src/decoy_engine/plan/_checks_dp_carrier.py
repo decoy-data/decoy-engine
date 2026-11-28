@@ -14,7 +14,9 @@ import math
 from typing import Any
 
 from decoy_engine import reasons
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine._config_text import ConfigPosition, Problem, config_refusal
+from decoy_engine._error_base import raise_bare
+from decoy_engine.plan._errors import refusal_error
 from decoy_engine.quality.dp_schema import (
     DP_ADJACENCY,
     DP_BOUNDARY_VALUES,
@@ -136,9 +138,7 @@ def check_flag_tokens_canonical(
     *,
     kind: Any,
     col_carrier: Any,
-    table_name: Any,
-    col_name: Any,
-    source_column: str,
+    position: ConfigPosition,
 ) -> None:
     """Raising wrapper around `_flag_tokens_are_canonical`, kept here (not in
     `_checks_dp.py`) so `verify_dp_snapshots`'s own call site stays a single
@@ -146,14 +146,15 @@ def check_flag_tokens_canonical(
     applies to. A no-op for anything but a `flag` categorical column."""
     if kind != "categorical" or col_carrier != "flag" or _flag_tokens_are_canonical(col_snap):
         return
-    raise PlanCompileError(
-        code=reasons.plan.DP_FLAG_TOKEN_INVALID,
-        path=f"tables.{table_name}.generate_columns.{col_name}.snapshot_file",
-        message=(
-            f"statistical column {col_name!r} in table {table_name!r}: source "
-            f"column {source_column!r} is a flag release with a top_values "
-            "token other than the canonical 'true'/'false'."
-        ),
+    raise_bare(
+        refusal_error(
+            reasons.plan.DP_FLAG_TOKEN_INVALID,
+            config_refusal(
+                position,
+                Problem.NOT_ALLOWED,
+                hint="Flag top_values must contain only the canonical true and false tokens",
+            ),
+        )
     )
 
 
@@ -224,8 +225,7 @@ def check_numeric_release_shape(
     *,
     source_column: str,
     numeric_domains: dict[str, Any],
-    table_name: Any,
-    col_name: Any,
+    position: ConfigPosition,
 ) -> None:
     """Raising numeric-release gate (guide section 4.4), lifted whole out of
     `verify_dp_snapshots` to keep that orchestrator under the ~600-LOC cap.
@@ -240,18 +240,8 @@ def check_numeric_release_shape(
     outside the declared domain the DP release promised."""
     domain = numeric_domains.get(source_column)
     numeric_bins = dp_block.get("numeric_bins")
-    shape_path = f"tables.{table_name}.generate_columns.{col_name}.snapshot_file"
-    shape_msg = (
-        f"statistical column {col_name!r} in table {table_name!r}: source "
-        f"column {source_column!r} is declared numeric, but its declared domain "
-        "or stats block does not have the shape a genuine fit_dp_snapshot "
-        "release always has (a finite lower<upper domain, a positive integer "
-        "numeric_bins, min/max equal to the declared bounds, mean/std null, "
-        "quantiles empty, and len(bin_counts) == numeric_bins). This is the "
-        "shape of an exact, non-DP snapshot with a copied or hand-written dp "
-        "block, not a DP release for this column."
-    )
-    if not (
+    canonical = None
+    if (
         isinstance(domain, list)
         and len(domain) == 2
         and _is_finite_real(domain[0])
@@ -260,25 +250,22 @@ def check_numeric_release_shape(
         and not isinstance(numeric_bins, bool)
         and numeric_bins >= 1
     ):
-        raise PlanCompileError(
-            code=reasons.plan.DP_SNAPSHOT_NUMERIC_SHAPE_MISMATCH, path=shape_path, message=shape_msg
-        )
-    # The conjunction above proved these; assert to narrow domain->list and
-    # numeric_bins->int for the arithmetic below (mypy cannot narrow through the
-    # negated conjunction on its own).
-    assert isinstance(domain, list)  # noqa: S101 - type-narrowing invariant
-    assert isinstance(numeric_bins, int)  # noqa: S101 - type-narrowing invariant
-    lower, upper = float(domain[0]), float(domain[1])
-    if not (
-        lower < upper
-        and numeric_shape_matches_a_dp_release(
+        lower, upper = float(domain[0]), float(domain[1])
+        if lower < upper and numeric_shape_matches_a_dp_release(
             col_snap, lower=lower, upper=upper, numeric_bins=numeric_bins
+        ):
+            canonical = _canonical_bin_edges(lower, upper, numeric_bins)
+    if canonical is None:
+        raise_bare(
+            refusal_error(
+                reasons.plan.DP_SNAPSHOT_NUMERIC_SHAPE_MISMATCH,
+                config_refusal(
+                    position,
+                    Problem.NOT_ALLOWED,
+                    hint="The numeric domain or histogram shape does not match a DP release",
+                ),
+            )
         )
-    ):
-        raise PlanCompileError(
-            code=reasons.plan.DP_SNAPSHOT_NUMERIC_SHAPE_MISMATCH, path=shape_path, message=shape_msg
-        )
-    canonical = _canonical_bin_edges(lower, upper, numeric_bins)
     edges = col_snap.get("stats", {}).get("bin_edges")
     edges_ok = (
         isinstance(edges, list)
@@ -287,23 +274,19 @@ def check_numeric_release_shape(
         and [float(e) for e in edges] == canonical
     )
     if not edges_ok:
-        raise PlanCompileError(
-            code=reasons.plan.DP_SNAPSHOT_NUMERIC_EDGES_MISMATCH,
-            path=f"tables.{table_name}.generate_columns.{col_name}.snapshot_file",
-            message=(
-                f"statistical column {col_name!r} in table {table_name!r}: source "
-                f"column {source_column!r} records bin_edges that are not the canonical "
-                "edges derived from its declared domain and numeric_bins. A genuine "
-                "fit_dp_snapshot release always carries the public evenly-spaced edges; "
-                "edges pushed outside the declared domain would make the sampler emit "
-                "values outside that domain, so a mismatch fails closed."
-            ),
+        raise_bare(
+            refusal_error(
+                reasons.plan.DP_SNAPSHOT_NUMERIC_EDGES_MISMATCH,
+                config_refusal(
+                    position,
+                    Problem.NOT_ALLOWED,
+                    hint="The histogram bin_edges must match the declared domain and numeric_bins",
+                ),
+            )
         )
 
 
-def check_release_compatibility(
-    dp_block: dict[str, Any], *, table_name: Any, col_name: Any
-) -> None:
+def check_release_compatibility(dp_block: dict[str, Any], *, position: ConfigPosition) -> None:
     """Raising release-shape-identity gate (guide sections 3.9/4.4): the artifact
     must record the EXACT codec, scope, adjacency and boundary this build's
     stability-1 argument is made for. `verify_dp_snapshots` checks the schema
@@ -318,29 +301,27 @@ def check_release_compatibility(
         and codec.get("id") == DP_CODEC_ID
         and codec.get("version") == DP_CODEC_VERSION
     ):
-        raise PlanCompileError(
-            code=reasons.plan.DP_SNAPSHOT_CODEC_UNSUPPORTED,
-            path=f"tables.{table_name}.generate_columns.{col_name}.snapshot_file",
-            message=(
-                f"statistical column {col_name!r} in table {table_name!r}: the snapshot "
-                f"records codec {codec!r}, not the {DP_CODEC_ID!r} version "
-                f"{DP_CODEC_VERSION!r} this build implements. The stability-1 guarantee "
-                "is specific to this codec generation; an artifact from another is not "
-                "one this build may accept."
-            ),
+        raise_bare(
+            refusal_error(
+                reasons.plan.DP_SNAPSHOT_CODEC_UNSUPPORTED,
+                config_refusal(
+                    position,
+                    Problem.NOT_ALLOWED,
+                    hint="The snapshot must use the supported DP codec and version",
+                ),
+            )
         )
     scope = dp_block.get("scope")
     adjacency = dp_block.get("adjacency")
     boundary = dp_block.get("boundary")
     if scope != DP_RELEASE_SCOPE or adjacency != DP_ADJACENCY or boundary not in DP_BOUNDARY_VALUES:
-        raise PlanCompileError(
-            code=reasons.plan.DP_SNAPSHOT_RELEASE_SHAPE_UNSUPPORTED,
-            path=f"tables.{table_name}.generate_columns.{col_name}.snapshot_file",
-            message=(
-                f"statistical column {col_name!r} in table {table_name!r}: the snapshot "
-                f"records scope={scope!r}, adjacency={adjacency!r}, boundary={boundary!r}, "
-                f"which must be exactly scope={DP_RELEASE_SCOPE!r}, "
-                f"adjacency={DP_ADJACENCY!r}, and a boundary in {DP_BOUNDARY_VALUES!r}. "
-                "The stability-1 argument is made for this release shape only."
-            ),
+        raise_bare(
+            refusal_error(
+                reasons.plan.DP_SNAPSHOT_RELEASE_SHAPE_UNSUPPORTED,
+                config_refusal(
+                    position,
+                    Problem.NOT_ALLOWED,
+                    hint="The snapshot must use the supported DP scope, adjacency and boundary",
+                ),
+            )
         )

@@ -37,6 +37,7 @@ from decoy_engine._config_text import (
     Name,
     Problem,
     Refusal,
+    at_generate_column,
     config_position,
     config_refusal,
     config_root_position,
@@ -292,9 +293,8 @@ def read_and_pin_snapshots(
     pinned: dict[str, ReadSnapshot] = {}
     failures: dict[str, Any] = {}
     for path, (table, column) in _snapshot_columns(config).items():
-        at_snapshot = config_root_position(
-            "tables", Name(table), "generate_columns", Name(column), "snapshot_file"
-        )
+        with at_generate_column(table, column):
+            at_snapshot = config_position("snapshot_file")
         field_key = f"tables.{table}.generate_columns.{column}.snapshot_file"
         read = read_pinned_artifact(
             FileRole.SNAPSHOT,
@@ -492,10 +492,10 @@ def check_fitted_references(
             name = col.get("name", "?")
             snapshot_file = col.get("snapshot_file")
             if not snapshot_file:
+                with at_generate_column(table_name, name):
+                    at_snapshot = config_position("snapshot_file")
                 missing = config_refusal(
-                    config_root_position(
-                        "tables", Name(table_name), "generate_columns", Name(name), "snapshot_file"
-                    ),
+                    at_snapshot,
                     Problem.MISSING,
                     hint=(
                         "The column uses distribution: fitted and needs `snapshot_file`. Run "

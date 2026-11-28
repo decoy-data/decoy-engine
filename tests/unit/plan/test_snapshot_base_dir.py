@@ -11,6 +11,7 @@ import dataclasses
 import json
 import os
 import shutil
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import fileaccess
+from decoy_engine.config import PipelineConfig
 from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.execution import run_pipeline_isolated
 from decoy_engine.execution._pipeline_context import with_quarantine_path
@@ -184,6 +186,283 @@ def test_denied_snapshot_grant_reports_the_display_position() -> None:
     assert info.value.field_key == "tables.synthetic.generate_columns.<name>.snapshot_file"
     assert "PRIVATEPW" not in str(info.value)
     assert info.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value", "code", "hint"),
+    [
+        (
+            "dp",
+            "schema",
+            None,
+            "dp_snapshot_not_dp_fit",
+            "Fit the snapshot with fit_dp_snapshot, or drop global_settings.dp",
+        ),
+        (
+            "dp",
+            "provenance",
+            {},
+            "dp_snapshot_provenance_uncertified",
+            "The recorded proof stack is not certified",
+        ),
+        (
+            "dp",
+            "codec",
+            {},
+            "dp_snapshot_codec_unsupported",
+            "The snapshot must use the supported DP codec and version",
+        ),
+        (
+            "dp",
+            "scope",
+            None,
+            "dp_snapshot_release_shape_unsupported",
+            "The snapshot must use the supported DP scope, adjacency and boundary",
+        ),
+        (
+            "dp",
+            "categorical_columns",
+            None,
+            "dp_snapshot_not_dp_fit",
+            "The DP block must declare categorical_columns and numeric_domains",
+        ),
+        (
+            "dp",
+            "column_schema",
+            {},
+            "dp_snapshot_query_count_mismatch",
+            "The column_schema carriers do not match the declared query schedule",
+        ),
+        (
+            "dp",
+            "query_count",
+            8,
+            "dp_snapshot_query_count_mismatch",
+            "The query_count does not match the declared columns",
+        ),
+        (
+            "dp",
+            "numeric_domains",
+            {"other": [0, 120]},
+            "dp_snapshot_column_schema_mismatch",
+            "The column_schema does not match categorical_columns and numeric_domains",
+        ),
+        (
+            "column",
+            "carrier",
+            "text",
+            "dp_snapshot_carrier_invalid",
+            "The column kind and carrier must be numeric/number or categorical/text or flag",
+        ),
+        (
+            "eligibility",
+            "column",
+            None,
+            "dp_snapshot_kind_not_dp_eligible",
+            "The snapshot must declare the source column as DP-eligible",
+        ),
+        (
+            "extra",
+            "column",
+            None,
+            "dp_snapshot_column_block_schema_mismatch",
+            "The column kind and carrier must match the DP column_schema entry",
+        ),
+        (
+            "column",
+            "stats",
+            {},
+            "dp_snapshot_numeric_shape_mismatch",
+            "The numeric domain or histogram shape does not match a DP release",
+        ),
+        (
+            "dp",
+            "numeric_bins",
+            0,
+            "dp_snapshot_numeric_shape_mismatch",
+            "The numeric domain or histogram shape does not match a DP release",
+        ),
+        (
+            "stats",
+            "bin_edges",
+            [2, 3],
+            "dp_snapshot_numeric_edges_mismatch",
+            "The histogram bin_edges must match the declared domain and numeric_bins",
+        ),
+        (
+            "flag",
+            "top_values",
+            [{"value": "invalid"}],
+            "dp_flag_token_invalid",
+            "Flag top_values must contain only the canonical true and false tokens",
+        ),
+        (
+            "dp",
+            "release_id",
+            None,
+            "dp_snapshot_missing_release_id",
+            "The DP block must declare a release_id",
+        ),
+        (
+            "dp",
+            "delta_total",
+            -1,
+            "dp_snapshot_budget_malformed",
+            "The composed epsilon_total and delta_total must be finite and nonnegative",
+        ),
+        (
+            "conflict",
+            "_marker",
+            1,
+            "dp_release_id_conflict",
+            "Each distinct artifact must have a distinct release_id",
+        ),
+    ],
+)
+def test_dp_snapshot_refusal_reports_only_the_display_position(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    field: str,
+    value: Any,
+    code: str,
+    hint: str,
+) -> None:
+    from tests.unit.generation.test_generate_dp_contract import (
+        _flag_dp_artifact,
+        _numeric_dp_artifact,
+    )
+
+    name = "https://user:PRIVATEPW@host/x"
+    config = stat_config()
+    config["targets"] = {"synthetic": {"type": "file", "format": "csv", "path": "out.csv"}}
+    config["global_settings"]["dp"] = {"epsilon": 1, "delta": 1e-6}
+    columns = config["tables"][0]["generate_columns"]
+    source = "flag" if section == "flag" else "age"
+    columns[0].update(name=name, source_column=source)
+    artifact = _flag_dp_artifact() if section == "flag" else _numeric_dp_artifact(epsilon_total=0.5)
+    inputs = [(name, artifact)]
+    if field == "schema":
+        artifact = json.loads((FIXTURES / "snap.json").read_text(encoding="utf-8"))
+        columns[0]["source_column"] = "amount"
+        inputs = [(name, artifact)]
+    elif section == "conflict":
+        columns.insert(0, {**columns[0], "name": "first", "snapshot_file": "first.json"})
+        inputs.insert(0, ("first", copy.deepcopy(artifact)))
+        artifact["dp"][field] = value
+    elif section in ("extra", "eligibility"):
+        if section == "eligibility":
+            # Isolate the eligibility check: the earlier schema check also rejects this artifact.
+            monkeypatch.setattr(
+                "decoy_engine.plan._checks_dp.column_block_matches_schema", lambda *args: True
+            )
+        artifact["columns"]["extra"] = artifact["columns"][source]
+        columns[0]["source_column"] = "extra"
+    else:
+        sections = {
+            "dp": artifact["dp"],
+            "column": artifact["columns"][source],
+            "stats": artifact["columns"][source]["stats"],
+            "flag": artifact["columns"][source]["stats"],
+        }
+        sections[section][field] = value
+    config = PipelineConfig.model_validate(config).model_dump()
+    with ExitStack() as stack:
+        grants = {}
+        for index, (column, snapshot) in enumerate(inputs):
+            path = tmp_path / f"{index}.json"
+            path.write_text(json.dumps(snapshot), encoding="utf-8")
+            stream = stack.enter_context(path.open("rb"))
+            grants[
+                FileRole.SNAPSHOT, f"tables.synthetic.generate_columns.{column}.snapshot_file"
+            ] = stream.fileno()
+        policy = fileaccess.PreopenedFileAccess(files=grants)
+        with pytest.raises(PlanCompileError) as info:
+            _compile(config, file_access=policy)
+        result = validate_plan(
+            config, empty_profile(), decoy_engine_version="test", file_access=policy
+        )
+    position = "tables.synthetic.generate_columns.<name>.snapshot_file"
+    message = f"not allowed. {hint}"
+    assert str(info.value) == f"[{code}] {position}: {message}"
+    assert info.value.__context__ is None
+    assert result.error is not None
+    assert (result.error.code, result.error.path, result.error.message) == (code, position, message)
+
+
+@pytest.mark.parametrize(
+    ("settings", "field", "code", "message"),
+    [
+        (
+            {"type": "reference", "distribution": "fitted"},
+            "distribution",
+            "dp_generate_fitted_fanout_unsupported",
+            "not allowed. Use distribution: random for a DP pipeline",
+        ),
+        (
+            {"condition_on": "age"},
+            "condition_on",
+            "dp_joint_unsupported",
+            "not allowed. Remove condition_on or drop global_settings.dp",
+        ),
+        (
+            {"high_cardinality": True},
+            "high_cardinality",
+            "dp_generate_high_cardinality_unsupported",
+            "not allowed. Remove high_cardinality or drop global_settings.dp",
+        ),
+        (
+            {"allow_real_categories": True},
+            "allow_real_categories",
+            "dp_generate_allow_real_categories_unsupported",
+            "not allowed. Remove allow_real_categories or drop global_settings.dp",
+        ),
+    ],
+)
+def test_dp_generate_contract_reports_the_display_position(
+    settings: dict[str, Any], field: str, code: str, message: str
+) -> None:
+    from decoy_engine.plan._checks_dp import check_dp_generate_contract
+
+    config = stat_config()
+    config["global_settings"]["dp"] = {"epsilon": 1}
+    config["tables"][0]["generate_columns"][0].update(
+        settings, name="https://user:PRIVATEPW@host/x"
+    )
+    with pytest.raises(PlanCompileError) as info:
+        check_dp_generate_contract(config)
+    position = f"tables.synthetic.generate_columns.<name>.{field}"
+    assert str(info.value) == f"[{code}] {position}: {message}"
+    assert (info.value.path, info.value.message) == (position, message)
+
+
+@pytest.mark.parametrize(
+    ("column", "field", "code", "message"),
+    [
+        (
+            {"type": "sequence", "high_cardinality": True},
+            "high_cardinality",
+            "statistical_high_cardinality_wrong_type",
+            "not allowed. Only statistical columns may set high_cardinality",
+        ),
+        (
+            {"type": "statistical"},
+            "snapshot_file",
+            "statistical_snapshot_file_required",
+            "missing. A statistical column requires snapshot_file",
+        ),
+    ],
+)
+def test_statistical_config_refusal_reports_the_display_position(
+    column: dict[str, Any], field: str, code: str, message: str
+) -> None:
+    config = stat_config()
+    config["tables"][0]["generate_columns"] = [{**column, "name": "https://user:PRIVATEPW@host/x"}]
+    with pytest.raises(PlanCompileError) as info:
+        run_config_only_checks(config)
+    position = f"tables.synthetic.generate_columns.<name>.{field}"
+    assert str(info.value) == f"[{code}] {position}: {message}"
+    assert (info.value.path, info.value.message) == (position, message)
 
 
 def test_a_rooted_policy_still_reads_a_root_relative_snapshot(

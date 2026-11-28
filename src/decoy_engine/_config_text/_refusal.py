@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePosixPath
 
 from decoy_engine import reasons
-from decoy_engine.fileaccess import position_key
+from decoy_engine.fileaccess import at_position, position_key
 from decoy_engine.reasons import approve_name
 
 
@@ -229,6 +230,12 @@ def config_root_position(*segments: Segment) -> ConfigPosition:
     segments at the config root (`tables`, ...): the enclosing `at_position` is not prepended,
     or a per-column host would see that column twice."""
     return ConfigPosition(_display(segments))
+
+
+def at_generate_column(table: object, column: object) -> AbstractContextManager[None]:
+    """Bind the display prefix for field refusals while keeping grant keys independent."""
+    at = config_root_position("tables", Name(table), "generate_columns", Name(column))
+    return at_position(at.key)
 
 
 class _Absent:
