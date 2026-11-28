@@ -263,8 +263,6 @@ def test_the_protected_dir_module_has_exactly_the_registered_remove_tree_calls(e
     assert sorted(where) == [
         ("_create_level", 0),
         ("_create_level", 1),
-        ("_takes_a_directory", 0),
-        ("protected_scratch_dir", 0),
     ]
 
 

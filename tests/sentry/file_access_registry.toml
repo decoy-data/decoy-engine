@@ -772,8 +772,8 @@ owner = "cam"
 reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn.__init__"
+module = "decoy_engine/fileaccess/_local_chain.py"
+function = "_make_stage_dir_win"
 sink = "Path.mkdir"
 ordinal = 0
 dir_category = "output_parent"
@@ -783,8 +783,8 @@ owner = "cam"
 reason = "ambient CLI semantics: the one policy that follows a caller path; never installed after forbid_ambient()"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_local.py"
-function = "LocalOutputTxn.__init__"
+module = "decoy_engine/fileaccess/_local_chain.py"
+function = "_make_stage_dir_win"
 sink = "tempfile.mkdtemp"
 ordinal = 0
 dir_category = "published_output"
@@ -1930,7 +1930,7 @@ ambient_only = true
 [[entry]]
 module = "decoy_engine/fileaccess/_local.py"
 function = "LocalOutputTxn.abort"
-sink = "decoy_engine.fileaccess._fdtree.remove_tree"
+sink = "decoy_engine.fileaccess._fdtree.remove_confirmed"
 ordinal = 0
 rule = "the FileRequest.locator of a request served by LocalFileAccess (or a stage name generated beside it)"
 owner = "cam"
@@ -1954,20 +1954,21 @@ rule = "a directory this call just created and found half-protected (the owner-o
 owner = "cam"
 reason = "the allocator removes only a directory it created itself, so no half-protected directory is left behind"
 
-[[entry]]
-module = "decoy_engine/fileaccess/_protected_dir.py"
-function = "protected_scratch_dir"
-sink = "decoy_engine.fileaccess._fdtree.remove_tree"
-ordinal = 0
-rule = "the fresh root this call allocated under the scratch root or a vetted parent, never a caller path"
-owner = "cam"
-reason = "the context manager removes the root it issued on every exit"
 
 [[entry]]
-module = "decoy_engine/fileaccess/_protected_dir.py"
-function = "_takes_a_directory"
+module = "decoy_engine/fileaccess/_fdtree.py"
+function = "remove_confirmed"
 sink = "decoy_engine.fileaccess._fdtree.remove_tree"
 ordinal = 0
-rule = "the probe directory this call just allocated under the base it is testing"
+rule = "a path an owner (the cleanup ledger or a local stage transaction) holds: the operand it recorded when it created it, never a caller-supplied path"
 owner = "cam"
-reason = "the probe is removed best-effort so a parent that denies delete is detected"
+reason = "removal is confirmed by a no-follow lookup afterwards, so a holder keeps ownership until the name is gone"
+
+[[entry]]
+module = "decoy_engine/fileaccess/cleanup/_ledger.py"
+function = "CleanupLedger._removal_confirmed"
+sink = "decoy_engine.fileaccess._fdtree.remove_confirmed"
+ordinal = 0
+rule = "the saved operand of an entry in INTENT, OWNED or REMOVED state; the holding check stands in for caller provenance"
+owner = "cam"
+reason = "the ledger removes only a path it recorded before creating it, after verifying the saved parent"
