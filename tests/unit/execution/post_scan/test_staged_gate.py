@@ -22,8 +22,9 @@ from decoy_engine.config import post_scan_resident_reason
 from decoy_engine.execution import _transactional_sink
 from decoy_engine.execution._chunked_output_sink import OutputPublish
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
-from decoy_engine.execution.pipeline import _post_scan
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
+from decoy_engine.execution.pipeline.post_scan import _suite as _post_scan_suite
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from decoy_engine.fileaccess import STAGE_MARKER
 from decoy_engine.internal.memory_limit import require_megabytes
 from decoy_engine.verification.postmask import PostScanBlockedError, from_staged
@@ -124,7 +125,7 @@ def test_at16_a_streamed_publish_session_is_gated_at_its_commit(tmp_path: Path) 
     sources = {"parent": pa.table({"id": ["a", "b", "c"]}), "child": pa.table({"pid": ["a"]})}
     gate = PostScanGate({"relationships": [rel]}, sources=sources)
     publish = OutputPublish(sink, True, False)
-    publish.open()
+    publish.start_streaming()
     sink.write("parent", pa.table({"id": ["a", "a", "b"]}))
     sink.write("child", pa.table({"pid": ["a"]}))
     with _bound(gate), pytest.raises(PostScanBlockedError) as caught:
@@ -212,7 +213,9 @@ def _forbid_whole_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(pq, "read_table", trap("read_table", pq.read_table))
     monkeypatch.setattr(pq.ParquetFile, "read", trap("ParquetFile.read", pq.ParquetFile.read))
     monkeypatch.setattr(
-        _post_scan, "materialize_source", trap("materialize_source", _post_scan.materialize_source)
+        _post_scan_suite,
+        "materialize_source",
+        trap("materialize_source", _post_scan_suite.materialize_source),
     )
     real = PostScanGate.before_commit
 

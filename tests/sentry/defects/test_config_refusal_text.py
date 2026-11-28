@@ -164,8 +164,8 @@ def test_deleting_the_last_occurrence_needs_the_key_removed() -> None:
 
 
 def test_the_merge_base_ratchet_catches_a_raised_count() -> None:
-    assert _ratchet.max_raised({"max": 3}, {"max": 2})
-    assert not _ratchet.max_raised({"max": 1}, {"max": 2})
+    assert _ratchet.bound_loosened({"max": 3}, {"max": 2})
+    assert not _ratchet.bound_loosened({"max": 1}, {"max": 2})
 
 
 # ---- seeded snippets: every rule fires, and clean forms pass ----------------------------------

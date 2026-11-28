@@ -109,9 +109,13 @@ __all__ = [
     "OUT_OF_CORE_REORDER_HEAD_FIT_INVALID",
     "POOL_SIZE_INVALID",
     "POOL_SIZE_OVERFLOW",
+    "POSTMASK_COLUMN_NOT_INSPECTABLE",
+    "POSTMASK_SOURCE_LENGTH_MISMATCH",
+    "POST_SCAN_COLUMN_NOT_INSPECTABLE",
     "SEED_WRONG_LENGTH",
     "SITE_NOT_PARTITIONABLE",
     "SITE_NOT_REPRODUCIBLE",
+    "SOURCE_COLUMN_UNREPRESENTABLE",
     "VAULT_REQUIRES_RESIDENT_OUTPUT",
 ]
 
@@ -407,4 +411,25 @@ OUT_OF_CORE_REORDER_FAN_IN_INVALID = _d(
 )
 OUT_OF_CORE_REORDER_HEAD_FIT_INVALID = _d(
     "out_of_core_reorder_head_fit_invalid", "Out of core reorder head fit invalid."
+)
+POSTMASK_COLUMN_NOT_INSPECTABLE = _d(
+    "postmask_column_not_inspectable",
+    "A column holds a value pandas cannot represent, so the post-mask check could not inspect it.",
+    since=UNRELEASED,
+)
+POSTMASK_SOURCE_LENGTH_MISMATCH = _d(
+    "postmask_source_length_mismatch",
+    "The source and output row streams differ in length, so the post-mask check could not "
+    "compare them row by row.",
+    since=UNRELEASED,
+)
+POST_SCAN_COLUMN_NOT_INSPECTABLE = _d(
+    "post_scan_column_not_inspectable",
+    "A column holds a value pandas cannot represent, so the post-scan check could not inspect it.",
+    since=UNRELEASED,
+)
+SOURCE_COLUMN_UNREPRESENTABLE = _d(
+    "source_column_unrepresentable",
+    "A source column holds a value pandas cannot represent.",
+    since=UNRELEASED,
 )

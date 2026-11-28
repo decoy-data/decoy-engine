@@ -32,6 +32,7 @@ from decoy_engine.determinism import check_pool_size, seed_bytes_to_int
 from decoy_engine.generation.pool._capacity import unique_capacity_ok
 from decoy_engine.generation.pool._cardinality import CardinalityMode
 from decoy_engine.generation.pool._errors import GenerationError, raise_uniqueness_impossible
+from decoy_engine.generation.pool._value_pool import pool_pick
 
 if TYPE_CHECKING:
     from decoy_engine.execution.native._index_ext import IndexDerivationKernel
@@ -278,8 +279,7 @@ class PoolSampler:
             rng = np.random.default_rng(seed_bytes_to_int(seed))
             if mode is CardinalityMode.REUSE:
                 indices = rng.integers(0, pool.size, size=n)
-                output = pool.values[indices]
-                return pd.Series(output)
+                return pd.Series(pool_pick(pool, indices))
             if mode is CardinalityMode.UNIQUE:
                 # DE-11: UNIQUE capacity is the NON-NULL output-row count. Preserved
                 # source nulls are re-emitted as null and consume no pool value, so

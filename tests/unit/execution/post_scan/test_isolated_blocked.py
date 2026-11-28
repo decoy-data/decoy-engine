@@ -12,7 +12,7 @@ import pytest
 from decoy_engine.execution import IsolatedRunResult, _governor, run_pipeline_isolated
 from decoy_engine.execution._governor import GovernorResult, run_job_with_governor
 from decoy_engine.execution._isolated_common import ISOLATED_OUTCOMES
-from decoy_engine.execution.pipeline._post_scan import PostScanGate
+from decoy_engine.execution.pipeline.post_scan._gate import PostScanGate
 from tests.unit.execution import _subset_run_support as subset_sup
 from tests.unit.execution.post_scan._orphan_defect import install
 from tests.unit.execution.test_lazy_path_route_admission import (

@@ -8,6 +8,13 @@
 # A row takes only `id`, `baseline` and `approved_growth`; any other key fails the ratchet.
 # Removing a sentry or deleting a sentry test file needs a dated owner decision in the tables at
 # the end of this file (`[retired]` by id, `[retired_files]` by path). Builders never write them.
+# `sentry-limits` records the scalar caps (`max`) and floors (`min`) the sentries compare against.
+# Its keys are guards: dropping one needs an `approved_growth` row, and retiring the id needs a
+# `[retired]` decision plus one `[retired_growth]` row per old key (`"<id>" = [{ key, decision }]`).
+# An approval row counts once: it passes in the PR that adds it, then sits on the merge base. The
+# same key twice fails, and rewording a row that is on the base is not fresh. To approve a later
+# raise of the same key, first merge a PR that removes the spent row, then add the new row in the
+# PR that changes the bound.
 
 [[sentry]]
 id = "f29-reason-baseline"
@@ -47,6 +54,9 @@ baseline = "tests/sentry/baselines/module-size.json"
 [[sentry]]
 id = "public-import-boundary"
 baseline = "tests/sentry/baselines/public-import-boundary.json"
+approved_growth = [
+  { key = "arrow_frames.py", decision = "owner 2026-11-24 arrow_frames.py public facade over internal.pandas_compat, same pattern as providers.py" },
+]
 
 [[sentry]]
 id = "exception-hierarchy"
@@ -299,6 +309,10 @@ approved_growth = [
   { key = "extra::_config_text/_read.py::_yaml_mark::getattr(exc.context_mark)::return", decision = "owner 2026-11-27 approved two moved keys (1:1 re-home of the old yaml_error_text keys, count unchanged), question F31-AUDIT--AE5-keys" },
   { key = "extra::_config_text/_read.py::_yaml_mark::getattr(exc.problem_mark)::return", decision = "owner 2026-11-27 approved two moved keys (1:1 re-home of the old yaml_error_text keys, count unchanged), question F31-AUDIT--AE5-keys" },
 ]
+
+[[sentry]]
+id = "sentry-limits"
+baseline = "tests/sentry/baselines/sentry-limits.json"
 
 # Owner decisions, each `"<id or path>" = "owner YYYY-MM-DD <reason of 15+ chars>"`. Printed by
 # `ratchet_check.py` as `decision` lines. A name already on the merge base does not count again.

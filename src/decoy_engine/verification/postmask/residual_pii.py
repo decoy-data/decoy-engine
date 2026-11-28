@@ -48,6 +48,7 @@ from typing import Any
 
 import pandas as pd
 
+from decoy_engine import reasons
 from decoy_engine.detection import NAME_HINT_GATED_DETECTORS
 from decoy_engine.detection.detectors import run_all_detectors
 from decoy_engine.verification.postmask._column_facts import ColumnFacts, DetectorRate
@@ -92,6 +93,8 @@ _WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"}
 # 'info' (a confirmation), not 'warning'. Without this, every
 # passthrough column that matched any detector emitted a false-positive
 # residual-PII warning.
+_NOT_INSPECTABLE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
+
 _NO_OP_BY_DESIGN: frozenset[str] = frozenset(
     {
         "passthrough",
@@ -508,6 +511,20 @@ def residual_pii_findings(
     ]
     for table_name, columns in output_facts.items():
         for col_name, fact in columns.items():
+            if _NOT_INSPECTABLE in (fact.identity_error, fact.distinct_error):
+                # Fail closed whatever the strategy: a column the check could not read is not a
+                # clean one. The text names the code only.
+                findings.append(
+                    ResidualPIIFinding(
+                        table=table_name,
+                        column=col_name,
+                        detector_id="",
+                        match_rate=0.0,
+                        severity="error",
+                        message=f"column could not be inspected ({_NOT_INSPECTABLE}); "
+                        "a leak cannot be ruled out.",
+                    )
+                )
             if not fact.detectors:
                 continue
             top = fact.detectors[0]
@@ -549,9 +566,14 @@ def residual_pii_findings(
                     _SEVERITY_ORDER[override[0]] > _SEVERITY_ORDER[severity]
                 ):
                     severity, message = override
-            elif fact.identity_error and configured not in _NO_OP_BY_DESIGN:
+            elif (
+                fact.identity_error
+                and fact.identity_error != _NOT_INSPECTABLE
+                and configured not in _NO_OP_BY_DESIGN
+            ):
                 # The source comparison could not run, so the escalation this column may need is
                 # unknown. Say so at error severity rather than report a clean "not compared".
+                # A column the check could not read already has its error finding above.
                 severity = "error"
                 message = (
                     f"column matched {top.detector_id!r} but the source comparison raised "

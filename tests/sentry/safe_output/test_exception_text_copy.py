@@ -36,7 +36,7 @@ SRC = ROOT / "src" / "decoy_engine"
 SENTRY_ID = "engine-exception-text-copies"
 BASELINE = _baseline_sources.baseline_path(SENTRY_ID)
 # The F31 audit figure after AE5. A change that removes a copy lowers it with the baseline entries.
-AUDIT_PARITY = 43
+AUDIT_PARITY = 41
 
 
 def _total(counts: dict[str, int], bucket: str) -> int:
@@ -63,9 +63,9 @@ def test_no_audit_copy_reaches_a_raise_message() -> None:
 
 def test_merge_base_ratchet_catches_a_raised_pin_and_a_site_swap() -> None:
     a, b = "audit::a.py::f::str(exc)::raise", "audit::b.py::g::str(exc)::raise"
-    assert _ratchet.max_raised({"max": 101}, {"max": 100})
-    assert _ratchet.max_raised({}, {"max": 100})  # dropping the max is also a raise
-    assert not _ratchet.max_raised({"max": 99}, {"max": 100})
+    assert _ratchet.bound_loosened({"max": 101}, {"max": 100})
+    assert _ratchet.bound_loosened({}, {"max": 100})  # dropping the max is also a raise
+    assert not _ratchet.bound_loosened({"max": 99}, {"max": 100})
     grown, _ = _ratchet.growth(frozenset({b}), frozenset({a}), per_site=False)
     assert grown == {b}  # equal count, different site: new key, needs an approval
     assert _ratchet.growth(frozenset({a}), frozenset({a}), per_site=False)[0] == frozenset()

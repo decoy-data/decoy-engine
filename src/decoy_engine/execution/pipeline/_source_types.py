@@ -13,7 +13,9 @@ import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, is_text
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.safe_output import attach_output_metadata
 
 
@@ -57,7 +59,10 @@ def _expected_index(source: pa.Table, stored: list[str]) -> pd.Index:
     the range its own pandas metadata describes (any start and step, so `df.iloc[::2]` and
     `df.iloc[::-1]` sources hold), else `0..n`."""
     if stored:
-        values = source.select(stored).replace_schema_metadata(None).to_pandas()
+        values = arrow_to_frame(
+            source.select(stored).replace_schema_metadata(None),
+            on_unrepresentable=source_column_unrepresentable(),
+        )
         return pd.MultiIndex.from_frame(values) if len(stored) > 1 else pd.Index(values[stored[0]])
     for entry in (source.schema.pandas_metadata or {}).get("index_columns", []):
         if isinstance(entry, dict) and entry.get("kind") == "range":

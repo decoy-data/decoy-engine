@@ -313,3 +313,39 @@ def test_warning_class_is_a_user_warning() -> None:
     with pytest.warns(PreScanWarning):
         warnings.warn(PreScanWarning("x"), stacklevel=1)
     assert isinstance(evaluate_pre_scan(_config([]), _core(people=[_field("n")])), PreScanVerdict)
+
+
+@pytest.mark.parametrize(
+    ("policy", "detectors"),
+    [
+        (None, ("regex",)),
+        ({"detectors": []}, ("regex",)),
+        ({"detectors": ["classifier"]}, ("classifier", "regex")),
+        ({"detectors": ["ner", "classifier"]}, ("classifier", "ner", "regex")),
+    ],
+)
+def test_regex_counts_for_any_detector_choice(
+    policy: dict[str, Any] | None, detectors: tuple[str, ...]
+) -> None:
+    """AT-E1f: regex is on without a `pre_scan` block, with an empty list and with a model only.
+
+    `verdict.detectors` stays the sorted tuple it was before regex moved into the config model."""
+    config = _config([])
+    if policy is None:
+        del config["pre_scan"]
+    else:
+        config["pre_scan"] = policy
+    verdict = evaluate_pre_scan(config, _core(people=[_field("ssn", pii=True)]))
+    assert [f.sources for f in verdict.findings] == [("regex",)]
+    assert verdict.detectors == detectors
+
+
+def test_effective_detectors_holds_no_regex_literal() -> None:
+    """AT-E1f: the rule lives in the config model, so the check does not add regex itself."""
+    import ast
+    import inspect
+
+    from decoy_engine.profiling.pre_scan import _check
+
+    tree = ast.parse(inspect.getsource(_check._effective_detectors))
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "regex"]

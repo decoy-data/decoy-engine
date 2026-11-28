@@ -72,9 +72,9 @@ class _Spies:
         for module in (_pandas_adapter, _sequential):
             real_convert = module.to_pandas_fk_safe
 
-            def convert(table: Any, cols: Any, _real: Any = real_convert) -> Any:
+            def convert(table: Any, cols: Any, _real: Any = real_convert, **kw: Any) -> Any:
                 self.conversions.append(table.num_rows)
-                return _real(table, cols)
+                return _real(table, cols, **kw)
 
             monkeypatch.setattr(module, "to_pandas_fk_safe", convert)
 

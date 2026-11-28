@@ -18,7 +18,7 @@ import pytest
 
 from decoy_engine import fileaccess, run_pipeline
 from decoy_engine.errors import PipelineValidationError
-from decoy_engine.execution.pipeline import _post_scan
+from decoy_engine.execution.pipeline.post_scan import _gate as _post_scan
 from decoy_engine.fileaccess import RootedFileAccess
 from decoy_engine.profile import LazySource
 from decoy_engine.verification.postmask import PostScanBlockedError

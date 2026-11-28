@@ -35,12 +35,13 @@ dict:
 A non-allowlisted file that crosses GOAL adds an entry (<= MAX) in the same PR;
 one that drops to <= GOAL deletes its entry.
 
-Rise rule (review-enforced, not machine-enforced): a ceiling may only rise by the
-PR's own LOC growth, `new_ceiling - old_ceiling <= max(0, new_loc - old_loc)`.
-ceiling_for(new_loc) is for an initial conversion or a required shrink only. This
-test reads one head and cannot see the previous ceiling without git history
-machinery, which is not added here; the reviewer checks the census diff against
-the file's own diff.
+Rise rule: a ceiling may only rise by the PR's own LOC growth,
+`new_ceiling - old_ceiling <= max(0, new_loc - old_loc)`. The ratchet enforces the floor of that
+rule by machine: each ALLOWLIST ceiling is recorded as `max` in baselines/module-size.json, and
+a raised or dropped `max` fails `scripts/dev/ratchet_check.py` unless an `approved_growth` row
+new in the diff names the key. The size of an approved rise is still the reviewer's check against
+the file's own diff. ceiling_for(new_loc) is for an initial conversion or a required shrink only.
+GOAL, MAX and MARGIN are recorded in baselines/sentry-limits.json the same way.
 
 Guarantee boundary (what this test does and does not enforce): the ceiling check
 enforces the rules against DRIFT -- an unrecorded growth past the ceiling, a

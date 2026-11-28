@@ -41,6 +41,7 @@ PUBLIC_BOUNDARY_FILES: tuple[str, ...] = (
     "__init__.py",
     "errors.py",
     "providers.py",
+    "arrow_frames.py",
     "sdk.py",
     "verification/canary/__init__.py",
     "telemetry/__init__.py",
@@ -66,6 +67,15 @@ PUBLIC_BOUNDARY_ALLOWLIST: dict[str, str] = {
         "is the engine's own seam, not an external leak. No removal "
         "trigger -- this is the architectural pattern V2.0-C committed "
         "to."
+    ),
+    "arrow_frames.py": (
+        "decoy_engine.arrow_frames is a thin public wrapper, like "
+        "providers.py, around decoy_engine.internal.pandas_compat. The "
+        "conversion keeps its internal home (it also serves the engine's own "
+        "readers) and the root package imports the three experimental names "
+        "from here instead of from internal. The import inside "
+        "arrow_frames.py is the engine's own seam, not an external leak. No "
+        "removal trigger."
     ),
 }
 

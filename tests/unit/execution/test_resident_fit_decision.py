@@ -288,7 +288,7 @@ def test_at_c6_a_refusal_opens_no_output_and_no_cast_run(
 
     opened: list[str] = []
     for owner, name in [
-        (sink.OutputPublish, "open"),
+        (sink.OutputPublish, "start_streaming"),
         (_boundary, "open_cast_run"),
         (full_frame, "run_full_frame_route"),
     ]:

@@ -18,7 +18,9 @@ from decoy_engine.generation import _column_streams, _faker_pool
 from tests.parity import _f0_fixtures as fx
 from tests.parity import _f0_witness as w
 from tests.parity._f0_canonical import table_fingerprint
+from tests.parity._f_audit_cells import replace_picks
 from tests.parity._fr0_support import fingerprints, partition_from_cuts, run_resident
+from tests.parity.support.pick_spy import picked_values
 
 _THRESHOLD = 90
 _ROWS = 100
@@ -158,25 +160,37 @@ def _trips(
     match: str,
     marking: bool = False,
     attribution: Any = None,
+    run: Any = None,
 ) -> None:
     monkeypatch.setattr(_faker_pool, "N_THRESHOLD", _THRESHOLD)
     with w.end_to_end(monkeypatch, marking=marking, attribution=attribution) as witness:
         mutate(monkeypatch)
-        tables = _run()
+        tables = (run or _run)()
     with pytest.raises(w.WitnessError, match=match):
         witness.classify(tables)
 
 
+def _like(out: Any, values: list[Any]) -> Any:
+    """`values` in the form the pick entry point returned: an Arrow array or a Python list."""
+    return pa.array(values) if isinstance(out, pa.Array) else values
+
+
+def _every_pick(mp: pytest.MonkeyPatch, replace: Any) -> None:
+    for name in _faker_pool.PooledSelector.PICK_METHODS:
+        _outer(mp, _faker_pool.PooledSelector, name, replace)
+
+
 def test_core_numpy_discarded_result_trips(monkeypatch: pytest.MonkeyPatch) -> None:
     def discard(inner: Any) -> Any:
-        def select(self: Any, size: int) -> list[Any]:
-            return [w.strip_mark(v) for v in inner(self, size)]
+        def pick(self: Any, size: int) -> Any:
+            out = inner(self, size)
+            return _like(out, [w.strip_mark(v) for v in picked_values(out)])
 
-        return select
+        return pick
 
     _trips(
         monkeypatch,
-        lambda mp: _outer(mp, _faker_pool.PooledSelector, "select", discard),
+        lambda mp: _every_pick(mp, discard),
         match="numpy-selected",
         marking=True,
     )
@@ -184,17 +198,59 @@ def test_core_numpy_discarded_result_trips(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_core_numpy_recompute_trips(monkeypatch: pytest.MonkeyPatch) -> None:
     def recompute(inner: Any) -> Any:
-        def select(self: Any, size: int) -> list[Any]:
-            picked = inner(self, size)
-            return [self._values[(i * 7) % len(self._values)] for i in range(len(picked))]
+        def pick(self: Any, size: int) -> Any:
+            out = inner(self, size)
+            return _like(out, [self._values[(i * 7) % len(self._values)] for i in range(size)])
 
-        return select
+        return pick
 
     _trips(
         monkeypatch,
-        lambda mp: _outer(mp, _faker_pool.PooledSelector, "select", recompute),
+        lambda mp: _every_pick(mp, recompute),
         match="numpy-selected",
         marking=True,
+    )
+
+
+def _list_route_config() -> dict[str, Any]:
+    """A pooled parent key column feeds a key collector, so its batches take the list route."""
+    parent = fx.table("lp", _ROWS, [{"name": "k", "type": "faker", "faker_type": "city"}])
+    child = fx.table(
+        "lc",
+        10,
+        [
+            {
+                "name": "pk",
+                "type": "reference",
+                "reference_table": "lp",
+                "reference_column": "k",
+            }
+        ],
+    )
+    return fx.config([parent, child])
+
+
+def test_a_list_route_column_is_not_reached_by_a_take_only_mutant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reach check: `take` never runs for this column, so replacing only `take` leaves the
+    witness green. That is why the mutants replace every entry in `PICK_METHODS`."""
+    monkeypatch.setattr(_faker_pool, "N_THRESHOLD", _THRESHOLD)
+    with w.end_to_end(monkeypatch, marking=True) as witness:
+        replace_picks(monkeypatch, ("take",))
+        tables = fx.run_generate_tables(_list_route_config())
+    witness.classify(tables)
+
+
+def test_a_list_route_column_is_reached_by_the_select_mutant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _trips(
+        monkeypatch,
+        replace_picks,
+        match="numpy-selected",
+        marking=True,
+        run=lambda: fx.run_generate_tables(_list_route_config()),
     )
 
 
