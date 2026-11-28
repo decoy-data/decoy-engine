@@ -233,3 +233,17 @@ def test_a_non_string_bound_is_unparseable_not_out_of_range(bound: Any) -> None:
     snap["max"] = bound
     out = ColumnGenerator(seed=1)._generate_distribution_datetime(3, snap, SEED)
     assert out.isna().all()
+
+
+@pytest.mark.parametrize("stamp", [pd.Timestamp.max, pd.Timestamp.min], ids=["max", "min"])
+def test_a_profiled_exact_nanosecond_limit_still_generates(stamp: pd.Timestamp) -> None:
+    """A profiler-written snapshot whose min or max is the exact pandas limit is representable,
+    and main generated it. The admission must not refuse the partial endpoint day."""
+    from decoy_engine.profiling._snapshot_values import distribution_snapshot_document
+
+    frame = pd.DataFrame({"event_time": [pd.Timestamp("2020-04-01")] * 1000 + [stamp]})
+    column = distribution_snapshot_document(frame, include_values=True)["columns"]["event_time"]
+    out = ColumnGenerator(seed=42).generate_column(
+        10, {"name": "event_time", "type": "distribution", "snapshot": column}, "t", {}
+    )
+    assert len(out) == 10 and out.notna().all()
