@@ -454,12 +454,10 @@ class TestFormulaHashKeyedMigration:
 
 class TestWalksGenF7DistributionDatetimeYear9999:
     """QA walks/generators F7 (2026-06-01, MEDIUM correctness):
-    `_generate_distribution_datetime` does not crash on source rows
-    with year 9999. Pre-fix `y + 1` produced the literal `10000-01-01`
-    string; `pd.Timestamp("10000-01-01")` raises OutOfBoundsDatetime.
-    Post-fix the exclusive year-end is capped at 9999-12-31 for the
-    year-9999 row only; the snapshot maximum (ts_max) clip below still
-    bounds the per-row window."""
+    `_generate_distribution_datetime` must not crash with OutOfBoundsDatetime on a snapshot with a
+    live year-9999 bin (`y + 1` once produced the literal `10000-01-01`). QA F7 fixed that with
+    a cap at the snapshot maximum. S5b replaced the cap with a refusal: a live bin outside the
+    fitted min and max years is a coded `plan/generation_unbounded_column` error."""
 
     def test_live_bin_beyond_ts_max_year_is_refused_not_clamped(self):
         """QA F7 capped a live year bin at ts_max.year so a malformed snapshot did not crash the

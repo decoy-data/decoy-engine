@@ -118,8 +118,11 @@ def admit_ns_datetime_snapshot(
     bounds: dict[str, int] = {}
     for prop, text in (("min", min_iso), ("max", max_iso)):
         too_far = False
+        if not isinstance(text, str):
+            # The sampler's unparseable-bound path (nulls), not a range refusal.
+            raise ValueError("bound is not text")
         try:
-            bounds[prop] = _ns_since_epoch(str(text))
+            bounds[prop] = _ns_since_epoch(text)
         except (OutOfBoundsDatetime, OverflowError):
             too_far = True
         # Raised outside the handler: the bound is a data value, so nothing may chain it.

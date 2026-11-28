@@ -2213,8 +2213,9 @@ Draws numbers from a named family, with no source file. To shape a column like a
 The fitted datetime sampler behind the SDK call `ColumnGenerator.generate_column` (type
 `distribution` with a `snapshot`) refuses a fitted bound outside 1677-09-22 to 2262-04-10, and a
 live year bin outside the snapshot's own min and max years, with `plan/generation_unbounded_column`.
-The refusal names the property (`min`, `max` or `year_bins`) and never a value. A snapshot whose
-max is before its min still gives null cells.
+The refusal names the property (`min`, `max` or `year_bins`) and never a value. Year bins are read
+as UTC years. A snapshot whose max is before its min gives null cells only when both bounds lie
+inside the nanosecond range; a bound outside it is refused first.
 
 ### lookup
 

@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from decoy_engine import reasons
+from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.contracts.distribution_snapshot import SAMPLED_YEARS_RULE
 from decoy_engine.generation._window_admission import (
     GenerationAdmissionError,
@@ -25,7 +26,6 @@ from decoy_engine.generation.statistical import (
     sample_column,
     spec_from_dict,
 )
-from decoy_engine.contracts.column_shape import NO_SOURCES
 from decoy_engine.generation.synthesize import _generate_column
 from decoy_engine.generators.columns import ColumnGenerator
 from decoy_engine.plan import PlanCompileError, compile_plan
