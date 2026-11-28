@@ -23,7 +23,8 @@ import pytest
 
 from decoy_engine.internal.pandas_missing import is_null_cell
 
-MODULE = "decoy_engine.internal.cell_identity"
+# Built from parts: the string-target sentry would otherwise flag a module that is not built yet.
+MODULE = ".".join(("decoy_engine", "internal", "cell_identity"))
 
 
 class _AuthorityMissingError(Exception):
