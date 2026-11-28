@@ -21,7 +21,10 @@ things against the live code:
    later chunk when it does not (`mixed`). The dispatcher lane profiles, routes and
    keeps `x` as the source column. It covers exactly the four cell ids in
    `RECOVERED_TIME64_CELLS`, with live checks of the values, the masked companions
-   and today's exception.
+   and today's exception. On the native route only, (e) also covers the two
+   `NATIVE_ONLY_TIME64_CELLS` (`redact` and `truncate`, `mixed`): the native leg masks
+   `x` in Arrow and never converts it, so it succeeds where today's lane fails in a
+   later chunk. Their oracle route fails like today's lane.
 
 The dispatcher lane here is B1's `run_mask_chunked` called as plan Design 4
 calls it (`_auto_chunk_support.b1_as_the_lane`), so this module passes before
@@ -59,6 +62,13 @@ RECOVERED_TIME64_CELLS = {
         ("none", "source_column_unrepresentable"),
         ("mixed", "full_frame_value_unrepresentable"),
     )
+}
+# Guarantee 3 (e), native route only: the native leg redacts or truncates `x` in Arrow and never
+# converts it to pandas, so it succeeds where today's lane fails in a later chunk. The oracle
+# route converts the column and fails like today's lane, so it is held to the ordinary rule.
+NATIVE_ONLY_TIME64_CELLS = {
+    f"time64_ns_nonaligned|{role}|mixed": "full_frame_value_unrepresentable"
+    for role in ("redact", "truncate")
 }
 CONTROL_TYPE = "time64_ns_aligned"
 
@@ -137,6 +147,9 @@ def test_cell_matches_record_and_differences_are_guarantee_3(
     if cell in RECOVERED_TIME64_CELLS:
         _check_recovered_time64(cell, route, src, l_rec, legacy, d_rec, disp, tmp_path, monkeypatch)
         return
+    if route == "native" and cell in NATIVE_ONLY_TIME64_CELLS:
+        _check_native_only_time64(cell, src, l_rec, legacy, d_rec, disp, tmp_path, monkeypatch)
+        return
     if legacy is None or disp is None:
         # An exception on either lane must be the same exception on the other: a lane
         # change never turns a failure into a success or the reverse.
@@ -212,19 +225,63 @@ def _check_recovered_time64(
     assert disp.schema.field("x").type == src.schema.field("x").type
     assert disp.column("x").equals(want), "x values differ from the source"
 
-    # The masked companions equal a representable control's outputs, so a lane that
-    # copies a raw source value into `h` or `r` fails.
+    _check_against_control_and_legacy(
+        cell, route, src, disp, code, STRING_OUTPUT_COLUMNS, tmp_path, monkeypatch
+    )
+
+
+def _check_native_only_time64(
+    cell: str,
+    src: pa.Table,
+    l_rec: dict[str, Any],
+    legacy: pa.Table | None,
+    d_rec: dict[str, Any],
+    disp: pa.Table | None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guarantee 3 (e) on the native route for a masked `x`, checked on the live run."""
+    assert legacy is None, f"{cell}: today's lane no longer raises; (e) does not apply"
+    code = NATIVE_ONLY_TIME64_CELLS[cell]
+    assert l_rec == {"exc": "ExecutionError", "code": code}
+    assert disp is not None, f"{cell}: the native dispatcher lane must succeed"
+    assert d_rec["mode"] == "chunked"
+    assert disp.column_names == src.column_names
+    assert disp.num_rows == src.num_rows
+    # `x` is masked to `string` with the source's nulls, and every column equals the
+    # representable control's output, so no raw time value reaches the output.
+    assert disp.schema.field("x").type == pa.string()
+    assert disp.column("x").is_null().equals(src.column("x").is_null())
+    _check_against_control_and_legacy(
+        cell, "native", src, disp, code, (*STRING_OUTPUT_COLUMNS, "x"), tmp_path, monkeypatch
+    )
+
+
+def _check_against_control_and_legacy(
+    cell: str,
+    route: str,
+    src: pa.Table,
+    disp: pa.Table,
+    code: str,
+    masked: tuple[str, ...],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The masked columns equal a representable control's outputs, and today's lane raises
+    the exact coded error with no context and no source value in its text."""
+    # A lane that copies a raw source value into a masked column fails here.
     control = matrix.run_cell(
         cell.replace("time64_ns_nonaligned", CONTROL_TYPE),
         monkeypatch,
         str(tmp_path / "ctl.parquet"),
     )[1][f"disp_{route}"][1]
     assert control is not None, "the representable control must succeed"
-    for name in STRING_OUTPUT_COLUMNS:
+    for name in masked:
         assert disp.column(name).equals(control.column(name)), f"{name}: differs from control"
         assert disp.schema.field(name).equals(control.schema.field(name), check_metadata=True)
 
     # Today's lane, run live: coded, value-free, and no exception context.
+    want = src.column("x")
     cfg, _ = matrix.build_source(cell, str(tmp_path / "legacy.parquet"))
     with pytest.raises(ExecutionError) as caught:
         support.run_legacy(cfg, src)
