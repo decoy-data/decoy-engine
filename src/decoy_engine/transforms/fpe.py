@@ -71,6 +71,14 @@ def resolve_fpe_charset(charset_spec: str) -> str:
     return _CHARSETS.get(charset_spec, charset_spec)
 
 
+# The refusal text for a charset `check_charset_unique` rejects. Fixed, so a re-raise never copies
+# the check's message (which quotes the configured charset).
+FPE_CHARSET_DUPLICATE_TEXT = (
+    "the fpe charset contains duplicate symbols; FF1 requires an ordered, duplicate-free "
+    "alphabet. Remove the repeated character(s) from the charset."
+)
+
+
 def check_charset_unique(charset_spec: str, charset: str) -> None:
     """Raise ``FpeUnencryptableError`` if ``charset`` has a duplicate symbol.
 
@@ -93,6 +101,14 @@ def check_charset_unique(charset_spec: str, charset: str) -> None:
 
 _PRINTABLE_ASCII_MIN = 0x21  # "!"
 _PRINTABLE_ASCII_MAX = 0x7E  # "~"
+
+
+# The refusal text for a charset `check_charset_ascii_printable` rejects. Fixed, like
+# FPE_CHARSET_DUPLICATE_TEXT.
+FPE_CHARSET_NON_ASCII_TEXT = (
+    "the fpe charset contains a character outside printable ASCII (0x21-0x7E). "
+    "Use printable ASCII symbols only."
+)
 
 
 def check_charset_ascii_printable(charset: str) -> None:
@@ -290,7 +306,8 @@ def _permute(s: str, key: bytes, charset: str, tweak: bytes, *, forward: bool) -
             )
         except _ff1.Ff1Error as exc:
             raise FpeUnencryptableError(
-                f"FF1 rejected this input: {exc}", code=reasons.runtime.FPE__UNENCRYPTABLE_LENGTH
+                "FF1 rejected this input: its length is outside the FF1 domain for this charset.",
+                code=reasons.runtime.FPE__UNENCRYPTABLE_LENGTH,
             ) from exc
         return "".join(charset[i] for i in result)
     except BaseException:

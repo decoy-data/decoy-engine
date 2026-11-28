@@ -209,7 +209,7 @@ def _run_admitted(
 
     with publish:
         if streamed:
-            publish.open()
+            publish.start_streaming()
         carrier, fk_warnings = _build_carrier(static, sources, generate_outputs)
 
         mask_outputs: dict[str, pa.Table] = {}

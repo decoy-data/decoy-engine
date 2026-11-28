@@ -78,6 +78,24 @@ class ComputedDrawSpec:
     def provider(self) -> str:
         return self.contract.provider
 
+    @property
+    def size(self) -> int:
+        """How many values the draw spans: with `values`, the shape of a pool a native selector
+        reads (`SelectableValues`), so the pool operator's index-then-gather serves `random_choice`."""
+        return self.count
+
+    @property
+    def values(self) -> np.ndarray[Any, Any]:
+        """The elements of a `random_choice` draw, in order; empty for a uuid or integer draw."""
+        return _object_array(self.elements)
+
+
+def _object_array(items: Sequence[Any]) -> np.ndarray[Any, Any]:
+    table = np.empty(len(items), dtype=object)
+    for i, item in enumerate(items):
+        table[i] = item
+    return table
+
 
 def computed_selection_namespace(namespace: str, provider: str) -> str:
     """The key namespace for a computed draw, apart from any pool draw in the same column."""
@@ -246,10 +264,7 @@ def int_from_index(index: np.ndarray[Any, Any], *, lo: int, step: int) -> pa.Arr
 
 def choice_from_index(index: np.ndarray[Any, Any], elements: Sequence[Any]) -> list[Any]:
     """The element at each index as Python scalars, left for the caller to type and coerce."""
-    table = np.empty(len(elements), dtype=object)
-    for i, element in enumerate(elements):
-        table[i] = element
-    chosen: list[Any] = table[np.asarray(index, dtype=np.int64)].tolist()
+    chosen: list[Any] = _object_array(elements)[np.asarray(index, dtype=np.int64)].tolist()
     return chosen
 
 

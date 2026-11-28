@@ -104,8 +104,8 @@ class TestFailClosed:
         with pytest.raises(ExecutionError) as exc:
             _run(cfg, df, tmp_path)
         assert exc.value.code == "fpe_unencryptable_value"
-        # P7: the message reports the value's length, never its content.
-        assert "5-character value" in exc.value.message
+        # P7: the message names the failure class, never the value or its length.
+        assert "outside the FPE domain" in exc.value.message
         assert "田中 太郎" not in exc.value.message
 
     def test_all_out_of_charset_orphan_key_fails_closed(self, tmp_path) -> None:

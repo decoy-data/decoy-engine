@@ -66,6 +66,7 @@ from decoy_engine.transforms.fpe import FF1_KEY_LABEL as FF1_KEY_LABEL  # re-exp
 from decoy_engine.transforms.fpe import (
     FF1_TWEAK_SCOPE_COLUMN,
     FF1_TWEAK_SCOPE_JOIN_GROUP,
+    FPE_CHARSET_DUPLICATE_TEXT,
     build_ff1_tweak,
     check_charset_unique,
     fpe_encrypt_value,
@@ -141,7 +142,7 @@ class FpeStrategyHandler:
             raise StrategyError(
                 code=reasons.runtime.FPE_CHARSET_DUPLICATE_SYMBOLS,
                 strategy="fpe",
-                message=f"column {column!r}: {exc}",
+                message=f"column {column!r}: {FPE_CHARSET_DUPLICATE_TEXT}",
             ) from exc
         if len(charset) < 2:
             # Sprint 2 honesty pack (S6, GATE-1 Q4): fail closed instead of
@@ -243,15 +244,15 @@ class FpeStrategyHandler:
                 code=strategy_code_for_unencryptable(exc),
                 strategy="fpe",
                 message=(
-                    f"column {column!r}: {exc}. The engine fails closed rather than "
-                    "emit unmaskable or non-round-trip output."
+                    f"column {column!r}: a value is outside the FPE domain of its charset. "
+                    "The engine fails closed rather than emit unmaskable or non-round-trip output."
                 ),
             ) from exc
         except FpeChecksumError as exc:
             raise StrategyError(
                 code=strategy_code_for_checksum(exc),
                 strategy="fpe",
-                message=f"column {column!r}: {exc}",
+                message=f"column {column!r}: a value cannot carry the configured checksum.",
             ) from exc
 
         out: list[object] = [None] * len(source)

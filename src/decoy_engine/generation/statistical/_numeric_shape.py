@@ -142,7 +142,7 @@ class NumericShape:
     counts: tuple[int, ...] | None
 
 
-def _invalid(column: object, member: str, why: str) -> NoReturn:
+def _invalid(column: str, member: str, why: str) -> NoReturn:
     refuse_degenerate(column, f"{member}: {why}")
 
 
@@ -160,7 +160,7 @@ def _finite_float(value: object) -> float | None:
     return None if overflow or not math.isfinite(as_float) else as_float
 
 
-def _members(column: object, key: str, block: object, expected: frozenset[str]) -> dict[str, Any]:
+def _members(column: str, key: str, block: object, expected: frozenset[str]) -> dict[str, Any]:
     if type(block) is not dict:
         _invalid(column, key, "the block is not an object")
     if block.keys() != expected:
@@ -168,13 +168,13 @@ def _members(column: object, key: str, block: object, expected: frozenset[str]) 
     return block
 
 
-def _member_list(column: object, key: str, member: str, raw: object) -> list[Any]:
+def _member_list(column: str, key: str, member: str, raw: object) -> list[Any]:
     if type(raw) is not list:
         _invalid(column, f"{key}.{member}", "not a list")
     return raw
 
 
-def _floats(column: object, member: str, raw: list[Any]) -> list[float]:
+def _floats(column: str, member: str, raw: list[Any]) -> list[float]:
     out: list[float] = []
     for item in raw:
         as_float = _finite_float(item)
@@ -184,7 +184,7 @@ def _floats(column: object, member: str, raw: list[Any]) -> list[float]:
     return out
 
 
-def _edges(column: object, stats: Mapping[str, Any]) -> tuple[float, float]:
+def _edges(column: str, stats: Mapping[str, Any]) -> tuple[float, float]:
     raw = stats.get("bin_edges")
     if type(raw) is list and len(raw) >= 2:
         low, high = _finite_float(raw[0]), _finite_float(raw[-1])
@@ -199,7 +199,7 @@ def _edges(column: object, stats: Mapping[str, Any]) -> tuple[float, float]:
 _MAX_MASS = 2**40
 
 
-def _mass(column: object, stats: Mapping[str, Any]) -> int:
+def _mass(column: str, stats: Mapping[str, Any]) -> int:
     """Finite row count of the column: the sum of its validated `bin_counts`."""
     raw = stats.get("bin_counts")
     if type(raw) is not list or not raw:
@@ -212,7 +212,7 @@ def _mass(column: object, stats: Mapping[str, Any]) -> int:
     return total
 
 
-def _check_grid_mass(column: object, probs: list[float], n: int) -> None:
+def _check_grid_mass(column: str, probs: list[float], n: int) -> None:
     """Each adjacent interval and both tails must hold at least K of the `n` fitted rows."""
     gaps = [probs[0], 1.0 - probs[-1], *(b - a for a, b in pairwise(probs))]
     slack = _EPS + n * 2**-50
@@ -224,7 +224,7 @@ def _check_grid_mass(column: object, probs: list[float], n: int) -> None:
         )
 
 
-def _decode_grid(column: object, block: object, edges: tuple[float, float], n: int) -> NumericShape:
+def _decode_grid(column: str, block: object, edges: tuple[float, float], n: int) -> NumericShape:
     members = _members(column, GRID_KEY, block, _GRID_MEMBERS)
     raw_probs = _member_list(column, GRID_KEY, "probs", members["probs"])
     raw_values = _member_list(column, GRID_KEY, "values", members["values"])
@@ -255,9 +255,7 @@ def _tolerance(edge: float) -> float:
     return 5e-13 + abs(edge) * 2**-52
 
 
-def _decode_exact(
-    column: object, block: object, edges: tuple[float, float], n: int
-) -> NumericShape:
+def _decode_exact(column: str, block: object, edges: tuple[float, float], n: int) -> NumericShape:
     members = _members(column, EXACT_KEY, block, _EXACT_MEMBERS)
     raw_values = _member_list(column, EXACT_KEY, "values", members["values"])
     raw_counts = _member_list(column, EXACT_KEY, "counts", members["counts"])
@@ -289,27 +287,13 @@ def _decode_exact(
     return NumericShape((), tuple(raw_values), tuple(raw_counts))
 
 
-def redacted_fix_hint(*, numeric: bool) -> str:
-    """The advice appended to a redacted-snapshot refusal. Numeric shapes need no opt-in flag."""
-    if numeric:
-        return (
-            "Use a faker or pattern generator for this column, or re-fit with "
-            "`--include-values` (the snapshot then holds the number shape)."
-        )
-    return (
-        "Use a faker or pattern generator for this column, or re-fit with "
-        "`--include-values` and set `allow_real_categories: true` (the snapshot then "
-        "holds real values)."
-    )
-
-
 def numeric_shape_withheld(stats: Mapping[str, Any]) -> bool:
     """True when either block holds a non-null value (a redacted fit leaves both None)."""
     return stats.get(GRID_KEY) is not None or stats.get(EXACT_KEY) is not None
 
 
 def decode_numeric_shape(
-    column: object, stats: Mapping[str, Any], carrier: str | None
+    column: str, stats: Mapping[str, Any], carrier: str | None
 ) -> NumericShape | None:
     """The validated grid or exact table of a numeric column, or None for the histogram path.
 

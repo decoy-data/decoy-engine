@@ -50,6 +50,7 @@ from decoy_engine.plan._seed import _normalize_job_seed
 from decoy_engine.transforms.fpe import (
     FF1_TWEAK_SCOPE_COLUMN,
     FF1_TWEAK_SCOPE_JOIN_GROUP,
+    FPE_CHARSET_DUPLICATE_TEXT,
     build_ff1_tweak,
     check_charset_unique,
     fpe_decrypt_value,
@@ -141,7 +142,7 @@ def _decrypt_column(
         except FpeUnencryptableError as exc:
             raise ExecutionError(
                 code=reasons.runtime.FPE_CHARSET_DUPLICATE_SYMBOLS,
-                message=f"column {column!r} in table {table_name!r}: {exc}",
+                message=f"column {column!r} in table {table_name!r}: {FPE_CHARSET_DUPLICATE_TEXT}",
             ) from exc
         if len(charset) < 2:
             raise ExecutionError(
@@ -316,7 +317,9 @@ def unmask_pipeline(
         try:
             vault_map, vault_ambiguous = load_vault(vault_path, mask_key.open()[0], vault=vault)
         except VaultError as exc:
-            raise ExecutionError(code=exc.code, message=exc.message) from exc
+            raise ExecutionError(
+                code=exc.code, message=reasons.lookup(exc.code)[0].summary
+            ) from exc
     reports: list[UnmaskColumnReport] = []
     outputs: dict[str, pa.Table] = {}
     configured_tables: set[str] = set()
