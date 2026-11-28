@@ -95,13 +95,6 @@ def arrow_column_profile(
     )
 
 
-def _is_view(t: pa.DataType, kind: str) -> bool:
-    """Whether `t` is the string or binary view type. The predicates arrive in PyArrow 16; the
-    declared floor is 14, where no value can have a view type."""
-    predicate = getattr(pa.types, f"is_{kind}_view", None)
-    return predicate is not None and bool(predicate(t))
-
-
 def _normalize(arr: pa.Array) -> pa.Array:
     """The representation pandas sees, using only types the compute kernels handle:
     an extension type is its storage (as `to_pandas` converts it), a run-end-encoded
@@ -119,9 +112,11 @@ def _normalize(arr: pa.Array) -> pa.Array:
             values = _normalize(arr.values)
             rebuilt = pa.RunEndEncodedArray.from_arrays(arr.run_ends, values)
             return pc.run_end_decode(rebuilt.slice(arr.offset, len(arr)))
-    if _is_view(t, "string"):
+    # The view predicates arrive in PyArrow 16. The declared floor is 14, where no value can
+    # have a view type, so a missing predicate means "not a view".
+    if hasattr(pa.types, "is_string_view") and pa.types.is_string_view(t):
         return arr.cast(pa.large_string())
-    if _is_view(t, "binary"):
+    if hasattr(pa.types, "is_binary_view") and pa.types.is_binary_view(t):
         return arr.cast(pa.large_binary())
     if pa.types.is_dictionary(t):
         dictionary = _normalize(arr.dictionary)
