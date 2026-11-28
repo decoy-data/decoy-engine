@@ -376,7 +376,7 @@ def classify_fpe_scheme(scheme: object) -> Literal["supported", "unsupported", "
 # through unmasked at runtime: with preserve_separators=True, missing characters
 # are treated as separators, fragmenting the value into short runs that fall
 # below the per-scheme L1 min-length guard and returning the input verbatim.
-# check_fpe_checksum_scheme in plan/_checks.py rejects the misconfiguration
+# check_fpe_checksum_scheme in plan/_checks_fpe.py rejects the misconfiguration
 # at plan-compile rather than letting it silently no-op at run time.
 #
 # iban is absent: FPE mode is unconditionally unsupported for iban regardless

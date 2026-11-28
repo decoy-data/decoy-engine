@@ -14,8 +14,7 @@ import pytest
 from decoy_engine import run_mask_chunked
 from decoy_engine.execution.native._crypto_ext import FpeConfig, FpeConfigError
 from decoy_engine.execution.native._fpe_ext import _CompiledFpeKernel
-from decoy_engine.plan._checks import check_fpe_checksum_scheme
-from decoy_engine.plan._checks_fpe import check_fpe_charset_config
+from decoy_engine.plan._checks_fpe import check_fpe_charset_config, check_fpe_checksum_scheme
 from decoy_engine.transforms.fpe import fpe_encrypt_value
 from tests.native._chunked_entry_support import ENGINE_VERSION, TABLE, key_provider, make_config
 

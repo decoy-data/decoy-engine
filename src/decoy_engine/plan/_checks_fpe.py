@@ -30,7 +30,7 @@ Reuses `_CHARSETS` / `check_charset_unique` / `check_charset_ascii_printable`
 from `transforms/fpe.py` as the single source of truth for named charsets and
 these two rules (no duplicated table or check to drift out of sync).
 
-This module exports exactly one function: `check_fpe_charset_config`.
+This module exports `check_fpe_charset_config` and `check_fpe_checksum_scheme`.
 """
 
 from __future__ import annotations
@@ -135,3 +135,121 @@ def check_fpe_charset_config(config: dict[str, Any]) -> None:
                     ),
                 )
                 raise_bare(refusal_error(reasons.plan.FPE_CHARSET_DEGENERATE, degenerate_refusal))
+
+
+def check_fpe_checksum_scheme(config: dict[str, Any]) -> None:
+    """Reject FPE columns whose ``checksum`` param is unknown, unsupported, or charset-incompatible.
+
+    Compile-check ownership table row #15 (SP-04 / P5.INFRA.1 remediation).
+
+    Three failure modes caught here:
+
+    1. Unknown scheme (typo, e.g. ``checksum: ibna``): Decoy forbids silent
+       misconfiguration passthrough.  Any value not in
+       ``checksums.classify_fpe_scheme`` raises with code
+       ``fpe_checksum_unknown_scheme``.
+
+    2. IBAN (``checksum: iban``): per-country BBAN structure enforced by
+       ``stdnum.iban.validate`` cannot be satisfied by a format-preservation
+       permutation.  Raises with code ``fpe_checksum_iban_unsupported``.
+       IBAN columns may still use ``checksums.validate('iban', ...)`` for
+       validation-only use cases; only the FPE mode is rejected here.
+
+    3. Charset incompatible with scheme (e.g. ``checksum: vin`` with a
+       digits-only charset): a charset that cannot represent the scheme's
+       required alphabet causes values to pass through unmasked at runtime.
+       With ``preserve_separators=True`` (the default), missing characters are
+       treated as separators; the extracted body falls below the scheme's L1
+       min-length guard and the value is returned verbatim.  Raises with code
+       ``fpe_checksum_charset_incompatible``.  A charset that is a strict
+       superset of the required alphabet is accepted: the runtime already
+       constrains the permutation to the scheme's own alphabet.
+
+    Config-only (no profile, no source data): safe to run in --no-profile
+    mode and in ``run_config_only_checks``.
+    """
+    from decoy_engine.checksums import classify_fpe_scheme, required_charset
+    from decoy_engine.transforms.fpe import _CHARSETS as _FPE_CHARSETS
+
+    tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
+    for table_entry in tables:
+        if not isinstance(table_entry, dict):
+            continue
+        table_name = table_entry.get("name", "?")
+        for col_entry in table_entry.get("columns", []) or []:
+            if not isinstance(col_entry, dict):
+                continue
+            if col_entry.get("strategy") != "fpe":
+                continue
+            provider_config = col_entry.get("provider_config") or {}
+            checksum = (
+                provider_config.get("checksum") if isinstance(provider_config, dict) else None
+            )
+            if not checksum:
+                continue
+            col_name = col_entry.get("name", "?")
+            verdict = classify_fpe_scheme(checksum)
+            at_checksum = config_position(
+                "tables", Name(table_name), "columns", Name(col_name), "provider_config", "checksum"
+            )
+            if verdict == "unknown":
+                unknown_refusal = config_refusal(
+                    at_checksum,
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "strategy fpe has an unknown checksum scheme. Check for typos; valid "
+                        "fpe checksum schemes are luhn, npi, vin, isbn13, ean13, gtin "
+                        "(iban is not supported for FPE mode)"
+                    ),
+                )
+                raise_bare(refusal_error(reasons.plan.FPE_CHECKSUM_UNKNOWN_SCHEME, unknown_refusal))
+            if verdict == "unsupported":
+                iban_refusal = config_refusal(
+                    at_checksum,
+                    Problem.NOT_ALLOWED,
+                    hint=(
+                        "strategy fpe does not support checksum 'iban': per-country BBAN "
+                        "structure (enforced by stdnum.iban.validate) cannot be satisfied by a "
+                        "format-preservation permutation. Use validate-only or a different "
+                        "strategy for IBAN columns"
+                    ),
+                )
+                raise_bare(refusal_error(reasons.plan.FPE_CHECKSUM_IBAN_UNSUPPORTED, iban_refusal))
+            # Charset-vs-scheme compatibility: a charset missing characters
+            # required by the scheme causes values to pass through unmasked
+            # (silent no-op).  Fail closed at compile.
+            charset_spec = (
+                provider_config.get("charset", "digits")
+                if isinstance(provider_config, dict)
+                else "digits"
+            )
+            charset_str = _FPE_CHARSETS.get(str(charset_spec), str(charset_spec))
+            charset_set = frozenset(charset_str)
+            required = required_charset(checksum)
+            if required is not None:
+                missing = required - charset_set
+                if missing:
+                    at_charset = config_position(
+                        "tables",
+                        Name(table_name),
+                        "columns",
+                        Name(col_name),
+                        "provider_config",
+                        "charset",
+                    )
+                    incompatible_refusal = config_refusal(
+                        at_charset,
+                        Problem.MISMATCH,
+                        hint=(
+                            "strategy fpe: the charset is missing characters the checksum "
+                            "scheme requires. A charset that cannot represent the scheme "
+                            "alphabet causes source values to pass through unmasked (silent "
+                            "no-op). Use a charset that is a superset of the scheme alphabet "
+                            "(e.g. 'ALPHANUM' for vin, 'digits' for luhn/npi/ean13/isbn13/gtin)"
+                        ),
+                    )
+                    raise_bare(
+                        refusal_error(
+                            reasons.plan.FPE_CHECKSUM_CHARSET_INCOMPATIBLE, incompatible_refusal
+                        )
+                    )

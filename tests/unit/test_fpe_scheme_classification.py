@@ -13,7 +13,7 @@ import pytest
 from decoy_engine import checksums, unmask_pipeline
 from decoy_engine.errors import FpeChecksumError
 from decoy_engine.execution import ExecutionError
-from decoy_engine.plan._checks import check_fpe_checksum_scheme
+from decoy_engine.plan._checks_fpe import check_fpe_checksum_scheme
 from decoy_engine.plan._errors import PlanCompileError
 from decoy_engine.transforms.fpe import fpe_encrypt_value
 from tests.unit.test_unmask import _config, _fpe_col
