@@ -166,7 +166,7 @@ def test_a_source_that_cannot_be_read_gives_one_error_finding_for_the_column():
     facts["t"]["customer_id"] = ColumnFacts(
         **{**bad.__dict__, "identity_error": reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE}
     )
-    findings = residual_pii_findings(facts, _cfg("redact"))
+    findings = _findings(facts, _cfg("redact"))
     errors = [f for f in findings if f.severity == "error"]
     assert len(errors) == 1
     assert reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE in errors[0].message

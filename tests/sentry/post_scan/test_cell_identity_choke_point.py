@@ -222,7 +222,8 @@ def test_the_scope_reaches_every_comparison_path() -> None:
         "verification/postmask/policy_validation.py",
         "verification/postmask/residual_pii.py",
         "verification/postmask/runner.py",
-        "execution/pipeline/_post_scan.py",
+        "execution/pipeline/post_scan/_gate.py",
+        "execution/pipeline/post_scan/_suite.py",
         "internal/cell_text.py",
     ):
         assert rel in scanned

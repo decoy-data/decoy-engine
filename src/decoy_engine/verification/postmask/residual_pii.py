@@ -1,44 +1,37 @@
 """Residual PII check (Reframe-A).
 
-Re-runs the existing detectors over the MASKED OUTPUT to find
-columns that still match a PII pattern. Distinguishes three cases:
+Re-runs the existing detectors over the MASKED OUTPUT to find columns that still match a PII
+pattern. Distinguishes three cases:
 
-1. Detector hit on a column that was NOT configured to be masked.
-   The operator likely forgot a column. Severity: warning.
-2. Detector hit on a column that WAS configured to be masked to a
-   strategy that legitimately produces detectable values (faker name
-   on a person_name column produces person_name detector hits; this
-   is the expected outcome). Severity: info.
-3. Detector hit on a column that WAS configured to be masked to a
-   strategy that should DESTROY the pattern (hash, redact, bucketize),
-   but the pattern survived. Indicates the mask did not fire or
+1. Detector hit on a column that was NOT configured to be masked. The operator likely forgot a
+   column. Severity: warning.
+2. Detector hit on a column that WAS configured to be masked to a strategy that legitimately
+   produces detectable values (faker name on a person_name column produces person_name detector
+   hits; this is the expected outcome). Severity: info.
+3. Detector hit on a column that WAS configured to be masked to a strategy that should DESTROY the
+   pattern (hash, redact, bucketize), but the pattern survived. Indicates the mask did not fire or
    failed silently. Severity: fail.
 
-Strategies that ARE expected to produce detector hits (i.e. legitimate
-realistic-fake): faker, formula, categorical (when categories are
-realistic-looking), reference (when parent values are realistic), date_shift.
+Strategies that ARE expected to produce detector hits (i.e. legitimate realistic-fake): faker,
+formula, categorical (when categories are realistic-looking), reference (when parent values are
+realistic), date_shift.
 
-Strategies that DESTROY the detector pattern: hash, redact, bucketize,
-truncate (when truncation depth is small enough that the pattern can no
-longer match). FPE is a special case -- it preserves character class
-distribution but scrambles values, so it might or might not produce
-detector hits depending on the source's natural format.
+Strategies that DESTROY the detector pattern: hash, redact, bucketize, truncate (when truncation
+depth is small enough that the pattern can no longer match). FPE is a special case -- it preserves
+character class distribution but scrambles values, so it might or might not produce detector hits
+depending on the source's natural format.
 
-Source comparison (audit C1 fix, 2026-06-12): when ``source_frames``
-is supplied, every detector-flagged column is additionally compared
-POSITIONALLY against its source column and the base severity can be
-escalated (never lowered). The signal is ``source_identity_rate`` --
-the fraction of aligned non-null rows where output == source. Value-set
-membership is deliberately NOT a signal: shuffle re-emits 100% of
-source values by design, categorical(from_profile) resamples the source
-category set, and reference draws from the parent domain, so membership
-false-positives on exactly the strategies that are working correctly.
-The substitution-vs-value-reuse split mirrors
-``validation/post/_checks/_leakage.py`` (``_VALUE_REUSE_STRATEGIES``):
-substitution strategies escalate on majority positional identity;
-value-reuse strategies escalate only on FULL positional identity (the
-mask provably did not move anything); constant-source columns
-(nunique <= 1) never escalate because identity is meaningless there.
+Source comparison (audit C1 fix, 2026-06-12): when ``source_frames`` is supplied, every detector-
+flagged column is additionally compared POSITIONALLY against its source column and the base
+severity can be escalated (never lowered). The signal is ``source_identity_rate`` -- the fraction
+of aligned non-null rows where output == source. Value-set membership is deliberately NOT a signal:
+shuffle re-emits 100% of source values by design, categorical(from_profile) resamples the source
+category set, and reference draws from the parent domain, so membership false-positives on exactly
+the strategies that are working correctly. The substitution-vs-value-reuse split mirrors
+``validation/post/_checks/_leakage.py`` (``_VALUE_REUSE_STRATEGIES``): substitution strategies
+escalate on majority positional identity; value-reuse strategies escalate only on FULL positional
+identity (the mask provably did not move anything); constant-source columns (nunique <= 1) never
+escalate because identity is meaningless there.
 """
 
 from __future__ import annotations
@@ -83,15 +76,13 @@ _WHOLE_CELL_DESTROYS: frozenset[str] = frozenset({"hash", "redact", "bucketize"}
 _NO_OP_BY_DESIGN: frozenset[str] = frozenset({"passthrough"})
 _NOT_INSPECTABLE = reasons.runtime.POSTMASK_COLUMN_NOT_INSPECTABLE
 
-# Strategies that REPLACE values per-cell: positional identity with the
-# source at scale means the mask did not fire. Mirrors the substitution
-# side of validation/post/_checks/_leakage.py.
+# Strategies that REPLACE values per-cell: positional identity with the source at scale means the
+# mask did not fire. Mirrors the substitution side of validation/post/_checks/_leakage.py.
 _SUBSTITUTION_STRATEGIES: frozenset[str] = frozenset({"faker", "date_shift", "fpe"})
 
-# Strategies that legitimately re-emit source VALUES (in new positions /
-# proportions): only FULL positional identity is a failure signal.
-# Mirrors _VALUE_REUSE_STRATEGIES in _leakage.py, plus reference (parent
-# domain == source FK domain by design).
+# Strategies that legitimately re-emit source VALUES (in new positions / proportions): only FULL
+# positional identity is a failure signal. Mirrors _VALUE_REUSE_STRATEGIES in _leakage.py, plus
+# reference (parent domain == source FK domain by design).
 _REUSES_SOURCE_VALUES: frozenset[str] = frozenset({"shuffle", "categorical", "reference"})
 
 # Escalation thresholds for substitution strategies and unconfigured columns. Faker/FPE
@@ -315,9 +306,8 @@ def _escalate(
         return None
 
     if configured == "formula":
-        # Formula may legitimately incorporate / echo source fragments;
-        # only full-column identity (an identity formula on a PII
-        # column) is certain failure.
+        # Formula may legitimately incorporate / echo source fragments; only full-column identity
+        # (an identity formula on a PII column) is certain failure.
         if full_identity:
             return (
                 "fail",
@@ -334,9 +324,8 @@ def _escalate(
             )
         return None
 
-    # Value-reuse strategies (shuffle/categorical/reference) and any
-    # other configured strategy: full positional identity means the
-    # mask provably moved nothing.
+    # Value-reuse strategies (shuffle/categorical/reference) and any other configured strategy:
+    # full positional identity means the mask provably moved nothing.
     if full_identity:
         return (
             "fail",
@@ -429,11 +418,10 @@ def _classify(
             f"strategy {configured!r} produces realistic-looking values.",
         )
     if configured in _REUSES_SOURCE_VALUES:
-        # Shuffle re-emits the source value multiset by design, so a
-        # detector hit on shuffled real values is the expected outcome
-        # (categorical/reference already classify as info via
-        # _PRODUCES_PII_LIKE_VALUES). The source-identity backstop in
-        # _escalate fails the column if the shuffle moved nothing.
+        # Shuffle re-emits the source value multiset by design, so a detector hit on shuffled real
+        # values is the expected outcome (categorical/reference already classify as info via
+        # _PRODUCES_PII_LIKE_VALUES). The source-identity backstop in _escalate fails the column if
+        # the shuffle moved nothing.
         return (
             "info",
             f"column matched {detector_id!r}; expected because the configured "
@@ -500,8 +488,7 @@ def residual_pii_findings(
             written = may_write(writes, table_name, col_name)
             # A passthrough leaves its cell alone only when nothing else writes the column.
             exempt = configured in _NO_OP_BY_DESIGN and not written
-            # A column the check could not read is not a clean one, whatever the strategy. It gets
-            # this one error finding; the text names the code only.
+            # A column the check could not read is never clean: one error finding, naming the code.
             unread = _NOT_INSPECTABLE in (fact.identity_error, fact.distinct_error)
             if unread:
                 findings.append(

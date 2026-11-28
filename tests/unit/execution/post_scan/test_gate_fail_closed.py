@@ -10,7 +10,6 @@ import dataclasses
 import functools
 import importlib
 import logging
-import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,7 +21,8 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from decoy_engine import run_pipeline
+from decoy_engine import reasons, run_pipeline
+from decoy_engine._execution_error import ExecutionError
 from decoy_engine.config import PipelineConfig, PipelineConfigError
 from decoy_engine.execution._transactional_sink import ParquetTransactionalSink
 from decoy_engine.execution.pipeline.post_scan import PostScanGate
@@ -148,10 +148,20 @@ def _unconvertible() -> tuple[pa.Table, pa.Table]:
 
 
 # ----- AT-14 (a): a conversion the deferred gate cannot make blocks -----------------------------
+# Since #799 the suite's input conversion fails with its own code, which passes through the gate
+# under either NER mode: the run stops on a coded, value-free error instead of a report.
+
+
+def _assert_not_inspectable(gate: PostScanGate, outcome: BaseException | None) -> None:
+    assert isinstance(outcome, ExecutionError)
+    assert outcome.code == reasons.runtime.POST_SCAN_COLUMN_NOT_INSPECTABLE
+    assert "'note'" in str(outcome)
+    # Never a clean pass: the gate holds no verdict that lets the run publish.
+    assert gate.verdict is None or gate.verdict.blocking
 
 
 @pytest.mark.parametrize("mode", ["warn", "fail"])
-def test_at14a_a_deferred_conversion_failure_is_a_blocking_check_error(
+def test_at14a_a_deferred_conversion_failure_is_a_coded_stop(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str
 ) -> None:
     detectors, _ = _fake_ner(monkeypatch)
@@ -159,23 +169,16 @@ def test_at14a_a_deferred_conversion_failure_is_a_blocking_check_error(
     gate = PostScanGate(_cfg(_ner(mode)), detectors=detectors, deferred=True)
     with caplog.at_level(logging.DEBUG):
         outcome = _outcome(lambda: gate.run_resident({"t": output}, {"t": source}, KINDS))
-    assert gate.ran and gate.report is not None
-    name = gate.report.get("pass_failed_with")
-    assert isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
-    assert gate.verdict is not None and gate.verdict.blocking
-    assert _codes(gate.report, mode) == ["check_error"]
-    if mode == "fail":
-        assert _assert_bare_block(outcome).report == gate.report
-    else:
-        assert outcome is None
+    _assert_not_inspectable(gate, outcome)
     _value_free(gate.report, outcome, caplog.text)
 
 
-def test_at14c_a_required_gate_blocks_the_same_conversion_failure() -> None:
+def test_at14c_a_required_gate_stops_on_the_same_conversion_failure() -> None:
     source, output = _unconvertible()
     gate = PostScanGate(_cfg())
     outcome = _outcome(lambda: gate.run_resident({"t": output}, {"t": source}, KINDS))
-    assert _codes(_assert_bare_block(outcome).report) == ["check_error"]
+    _assert_not_inspectable(gate, outcome)
+    _value_free(gate.report, outcome)
 
 
 # ----- AT-14 (b): a residual comparison error under a deferred gate -----------------------------
