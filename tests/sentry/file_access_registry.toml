@@ -1960,6 +1960,6 @@ module = "decoy_engine/fileaccess/cleanup/_ledger.py"
 function = "CleanupLedger._removal_confirmed"
 sink = "decoy_engine.fileaccess._fdtree.remove_confirmed"
 ordinal = 0
-rule = "the saved operand of an entry in INTENT, OWNED or REMOVED state; the holding check stands in for caller provenance"
+rule = "the saved operand of an entry in INTENT, OWNED or REMOVED state; the holding check stands in for provenance"
 owner = "cam"
 reason = "the ledger removes only a path it recorded before creating it, after verifying the saved parent"
