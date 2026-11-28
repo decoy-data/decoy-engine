@@ -18,11 +18,17 @@ from decoy_engine.execution.native._dispatch import (
     plan_native_route,
     run_native_or_oracle_chunked,
 )
+from decoy_engine.execution.native._operator_config_rejections import (
+    FpeChecksumContext,
+    fpe_checksum_config_rejection,
+)
 
 __all__ = [
     "MAX_NATIVE_THREADS",
+    "FpeChecksumContext",
     "NativeRouteEvidence",
     "NodeRouteRecord",
+    "fpe_checksum_config_rejection",
     "plan_native_route",
     "run_native_or_oracle_chunked",
 ]
