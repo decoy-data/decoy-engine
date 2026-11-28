@@ -3,16 +3,13 @@
 Every post-mask reader (the batch facts, the frame runner, the standalone residual and policy
 checks) asks `identity_facts` and `distinct_values`; none compares or counts cells on its own
 (`tests/sentry/post_scan/test_cell_identity_choke_point.py`). The comparison runs on the cells
-as the caller holds them, before any Arrow conversion of a frame, so a set keeps set semantics,
-a nested unit stays exact and an absent struct field stays absent.
+as the caller holds them, before any Arrow conversion, so sets and absent struct fields stay as is.
 
 Per row (`_verdict`): unbox; refuse a NumPy record, a cycle or an unhashable unknown object at
 any depth, on every cell, before any shortcut; then both null, one null, text against non-text
 (SAME only for a listed export spelling, `_spelled`), and otherwise the value forms (`_form`)
 matched recursively. Numbers compare at their exact value, so no binary64 rounding, decimal
-context or int-to-str limit enters a verdict. Pattern: the typed comparator plus scalar
-fallback of datacompy's `columns_equal`, with an exact scalar path in place of its mixed-type
-"not equal".
+context or int-to-str limit enters a verdict. Pattern: datacompy's `columns_equal`.
 """
 
 from __future__ import annotations
@@ -511,9 +508,8 @@ def _typed_facts(a: pa.Array, b: pa.Array) -> IdentityFacts:
 def identity_facts(src: Column, out: Column) -> IdentityFacts:
     """The identity facts of two equal-length columns compared by position.
 
-    Raises `CellNotComparableError` for a record, cycle or unhashable cell on either side, and
-    `UnreadableCellError` for a cell it cannot read: text bytes that are not UTF-8, or a value no
-    cast or Python type can hold (a `date32` past year 9999). Both have fixed text."""
+    Raises `CellNotComparableError` for a record, cycle or unhashable cell, and `UnreadableCellError`
+    for a cell it cannot read (non-UTF-8 text, a `date32` past year 9999)."""
     if len(src) != len(out):
         raise ValueError("identity_facts: the columns differ in length")
     unreadable = False
@@ -576,8 +572,7 @@ class DistinctBudgetError(DecoyError):
 class DistinctCounter:
     """An exact distinct count over the batches of one column, refused before its memory budget.
 
-    The budget is an estimate of `_ENTRY_BYTES` per distinct form; a refusal raises
-    `DistinctBudgetError` and the partial count is discarded."""
+    The budget is `_ENTRY_BYTES` per distinct form; a refusal raises `DistinctBudgetError`."""
 
     _ENTRY_BYTES = 256
 
@@ -588,9 +583,9 @@ class DistinctCounter:
     def add(self, column: Column) -> None:
         if isinstance(column, (pa.Array, pa.ChunkedArray)) and _ticks(column.type):
             # Ticks in the declared unit: one schema, so one unit for the whole column.
-            self._seen.update(pc.cast(column.drop_null(), pa.int64()).to_pylist())
+            self._seen |= set(pc.cast(column.drop_null(), pa.int64()).to_pylist())
         else:
-            self._seen.update(_forms(column))
+            self._seen |= set(_forms(column))
         if len(self._seen) > self._limit:
             self._seen = set()
             raise DistinctBudgetError
