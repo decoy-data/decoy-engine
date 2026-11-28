@@ -27,18 +27,18 @@ from typing import Any
 import yaml
 
 from decoy_engine import reasons
-from decoy_engine._config_text import Name, config_root_position
+from decoy_engine._config_text import config_root_position
 from decoy_engine.expressions._when_parser import validate_envelope_when
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.plan._checks_dp import check_dp_generate_contract, verify_dp_snapshots
-from decoy_engine.plan._errors import PlanCompileError
+from decoy_engine.plan._errors import PlanCompileError, refusal_error
 from decoy_engine.plan._generation import (
     ReadSnapshot,
     build_generation_plan,
     check_generate_snapshot_columns,
     column_pins_snapshot,
     pinned_digest_message,
-    snapshot_schema_failure,
+    snapshot_schema_refusal,
     verified_pinned_bytes,
 )
 from decoy_engine.plan._serialize_declared import (
@@ -333,7 +333,8 @@ def _pinned_snapshot_from_dict(
         PlanCompileError: ``code='dp_pinned_snapshot_digest_mismatch'``
             when the recomputed digest disagrees with the stored one.
     """
-    position = f"generation.snapshots[{index}]"
+    at_position = config_root_position("generation", "snapshots", index)
+    position = at_position.key
     source_path = data["source_path"]
     raw = verified_pinned_bytes(data)
     if raw is None:
@@ -353,7 +354,6 @@ def _pinned_snapshot_from_dict(
     # non-JSON payload is a typed refusal, raised outside the handler so no decoder error rides.
     from decoy_engine.generation.statistical import StatisticalSpecError, parse_snapshot_json
 
-    at_position = config_root_position(Name(position))
     parsed: Any = None
     not_json = False
     try:
@@ -369,11 +369,11 @@ def _pinned_snapshot_from_dict(
                 "valid JSON. A digest match is not proof the payload is a JSON snapshot artifact."
             ),
         )
-    mismatch = snapshot_schema_failure(
-        parsed, config_root_position(Name(position), "schema_version")
+    mismatch = snapshot_schema_refusal(
+        parsed, config_root_position("generation", "snapshots", index, "schema_version")
     )
     if mismatch is not None:
-        raise PlanCompileError(code=mismatch.code, path=position, message=mismatch.message)
+        raise refusal_error(reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH, mismatch)
     read_snapshot = ReadSnapshot(
         path=source_path,
         sha256=stored_sha256,

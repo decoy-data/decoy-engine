@@ -104,13 +104,13 @@ def _iter_statistical_snapshot_paths(config: dict[str, Any]) -> list[str]:
     """Every distinct `snapshot_file` path referenced by a pinning generate
     column (`column_pins_snapshot`), in declared order (tables then columns),
     de-duplicated by path string while preserving first-seen order."""
-    return list(_snapshot_field_keys(config))
+    return list(_snapshot_columns(config))
 
 
-def _snapshot_field_keys(config: dict[str, Any]) -> dict[str, str]:
+def _snapshot_columns(config: dict[str, Any]) -> dict[str, tuple[object, object]]:
     """`{path: config position}` for the same paths, first-seen position kept, so a
     denial names where the path was written and never the path."""
-    seen: dict[str, str] = {}
+    seen: dict[str, tuple[object, object]] = {}
     tables = config.get("tables", []) if isinstance(config.get("tables"), list) else []
     for table_entry in tables:
         if not isinstance(table_entry, dict):
@@ -120,27 +120,19 @@ def _snapshot_field_keys(config: dict[str, Any]) -> dict[str, str]:
                 continue
             path = col_entry.get("snapshot_file")
             if path:
-                key = f"tables.{table_entry.get('name')}.generate_columns.{col_entry.get('name')}.snapshot_file"
-                seen.setdefault(str(path), key)
+                seen.setdefault(str(path), (table_entry.get("name"), col_entry.get("name")))
     return seen
 
 
-def snapshot_schema_failure(parsed: Any, at_version: ConfigPosition) -> Any:
-    """The one snapshot schema-version check, for compile (`read_and_pin_snapshots`) and plan
-    load. Returns a `StatisticalSpecError` or `None`. The message names the field and the
-    expected version only: the stored text is untrusted and never echoed."""
-    from decoy_engine.generation.statistical._spec import StatisticalSpecError
-
+def snapshot_schema_refusal(parsed: Any, at_version: ConfigPosition) -> Refusal | None:
+    """Validate the parsed snapshot version for both compilation and stored-plan loading."""
     if isinstance(parsed, dict) and parsed.get("schema_version") in ACCEPTED_SCHEMA_VERSIONS:
         return None
-    refusal = config_refusal(
+    return config_refusal(
         at_version,
         Problem.MISMATCH,
         expected=Expected.SCHEMA_VERSION,
         hint="This engine consumes only the accepted schema versions",
-    )
-    return StatisticalSpecError(
-        code=reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH, message=refusal.text
     )
 
 
@@ -289,19 +281,25 @@ def read_and_pin_snapshots(
     there (`fileaccess.config_relative`). Both result maps stay keyed by the declared string,
     so the plan bytes and the config hash never see the resolved path.
     """
-    from decoy_engine.generation.statistical import StatisticalSpecError, parse_snapshot_json
+    from decoy_engine.generation.statistical import (
+        StatisticalSpecError,
+        parse_snapshot_json,
+        statistical_spec_error,
+    )
 
     pinned: dict[str, ReadSnapshot] = {}
     failures: dict[str, Any] = {}
-    for path, field_key in _snapshot_field_keys(config).items():
+    for path, (table, column) in _snapshot_columns(config).items():
+        at_snapshot = config_root_position(
+            "tables", Name(table), "generate_columns", Name(column), "snapshot_file"
+        )
         read = read_pinned_artifact(
             FileRole.SNAPSHOT,
             path,
-            field_key,
+            at_snapshot.key,
             base_dir,
             EMBEDDED_SNAPSHOT_MAX_BYTES,
         )
-        at_snapshot = config_root_position(Name(field_key))
         if read.oversize:
             too_large = config_refusal(
                 at_snapshot,
@@ -335,11 +333,21 @@ def read_and_pin_snapshots(
         guard = snapshot_content_guard.get()
         if guard is not None:
             guard(parsed)
-        mismatch = snapshot_schema_failure(
-            parsed, config_root_position(Name(field_key), "schema_version")
+        mismatch = snapshot_schema_refusal(
+            parsed,
+            config_root_position(
+                "tables",
+                Name(table),
+                "generate_columns",
+                Name(column),
+                "snapshot_file",
+                "schema_version",
+            ),
         )
         if mismatch is not None:
-            failures[path] = mismatch
+            failures[path] = statistical_spec_error(
+                reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH, mismatch
+            )
             continue
         pinned[path] = ReadSnapshot(path=path, sha256=digest, parsed=parsed, raw=raw)
     return pinned, failures

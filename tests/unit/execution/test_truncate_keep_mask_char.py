@@ -70,8 +70,9 @@ class TestTruncateV1ByteIdentity:
         df = pd.DataFrame({"col": ["hello"]})
         with pytest.raises(StrategyError) as exc:
             TruncateHandler().run(df.copy(), "col", _seed({"length": length}), _FakeCtx())
+        kind = "string" if isinstance(length, str) else "integer"
         assert exc.value.message == (
-            f"strategy='truncate': column 'col' uses truncate with an invalid length (type {type(length).__name__}); "
+            f"strategy='truncate': provider_config.length: not allowed, got {kind}. "
             "length must be an integer >= 1."
         )
 
@@ -82,7 +83,7 @@ class TestTruncateV1ByteIdentity:
                 df.copy(), "col", _seed({"length": 2, "keep": "https://u:pw@h/x"}), _FakeCtx()
             )
         assert exc.value.message == (
-            "strategy='truncate': column 'col' uses truncate with an invalid keep; keep must be 'head' or 'tail'."
+            "strategy='truncate': provider_config.keep: not allowed, got string. keep must be 'head' or 'tail'."
         )
 
     def test_length_one_is_valid(self):

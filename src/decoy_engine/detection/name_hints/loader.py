@@ -41,8 +41,8 @@ from decoy_engine._config_text import (
     Name,
     Problem,
     Refusal,
-    config_position,
     config_refusal,
+    config_root_position,
     read_config,
 )
 from decoy_engine._error_base import raise_bare
@@ -88,7 +88,7 @@ def load_name_hint_terms(
                     FileRole.MODEL_PACK_ROOT, "read_dir", str(directory), "pre_scan.name_hints"
                 )
             ),
-            config_position("pre_scan", "name_hints"),
+            config_root_position("pre_scan", "name_hints"),
             _refuse,
             passes=(FileAccessDenied,),
         )
@@ -125,7 +125,7 @@ def _is_file(handle: DirHandle, name: str) -> bool:
     # probe is a protected read: it becomes a value-free refusal.
     return read_config(
         probe,
-        config_position("pre_scan", "name_hints", Member(name)),
+        config_root_position("pre_scan", "name_hints", Member(name)),
         _refuse,
         passes=(FileAccessDenied,),
     )
@@ -136,7 +136,7 @@ def _load_terms(handle: DirHandle) -> dict[str, list[str]]:
         raise_bare(
             _refuse(
                 config_refusal(
-                    config_position("pre_scan", "name_hints", Member(_MANIFEST_NAME)),
+                    config_root_position("pre_scan", "name_hints", Member(_MANIFEST_NAME)),
                     Problem.NOT_FOUND,
                     hint=(
                         "Every name-hint directory must contain a manifest.yaml "
@@ -148,7 +148,7 @@ def _load_terms(handle: DirHandle) -> dict[str, list[str]]:
 
     manifest = _read_yaml(handle, _MANIFEST_NAME)
     files = manifest.get("files") if isinstance(manifest, dict) else None
-    at_files = config_position("pre_scan", "name_hints", Member(_MANIFEST_NAME), "files")
+    at_files = config_root_position("pre_scan", "name_hints", Member(_MANIFEST_NAME), "files")
     if files is None:
         raise_bare(
             _refuse(config_refusal(at_files, Problem.MISSING, expected=Expected.NON_EMPTY_LIST))
@@ -172,7 +172,9 @@ def _load_terms(handle: DirHandle) -> dict[str, list[str]]:
     merged: dict[str, list[str]] = {}
 
     for idx, fname in enumerate(files):
-        at_file = config_position("pre_scan", "name_hints", Member(_MANIFEST_NAME), "files", idx)
+        at_file = config_root_position(
+            "pre_scan", "name_hints", Member(_MANIFEST_NAME), "files", idx
+        )
         if not isinstance(fname, str):
             raise_bare(
                 _refuse(
@@ -183,7 +185,7 @@ def _load_terms(handle: DirHandle) -> dict[str, list[str]]:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position("pre_scan", "name_hints", Member(fname)),
+                        config_root_position("pre_scan", "name_hints", Member(fname)),
                         Problem.NOT_FOUND,
                         expected=Expected.FILE,
                     )
@@ -194,7 +196,7 @@ def _load_terms(handle: DirHandle) -> dict[str, list[str]]:
                 raise_bare(
                     _refuse(
                         config_refusal(
-                            config_position(
+                            config_root_position(
                                 "pre_scan", "name_hints", Member(fname), "detectors", Name(det_id)
                             ),
                             Problem.DUPLICATE,
@@ -222,7 +224,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
         raise_bare(
             _refuse(
                 config_refusal(
-                    config_position("pre_scan", "name_hints", Member(name)),
+                    config_root_position("pre_scan", "name_hints", Member(name)),
                     Problem.WRONG_TYPE,
                     expected=Expected.MAPPING,
                     got=data,
@@ -236,7 +238,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
         raise_bare(
             _refuse(
                 config_refusal(
-                    config_position("pre_scan", "name_hints", Member(name), "detectors"),
+                    config_root_position("pre_scan", "name_hints", Member(name), "detectors"),
                     Problem.WRONG_TYPE,
                     expected=Expected.LIST,
                     got=raw_entries,
@@ -246,7 +248,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
 
     out: dict[str, list[str]] = {}
     for idx, entry in enumerate(raw_entries):
-        at_entry = config_position("pre_scan", "name_hints", Member(name), "detectors", idx)
+        at_entry = config_root_position("pre_scan", "name_hints", Member(name), "detectors", idx)
         if not isinstance(entry, dict):
             raise_bare(
                 _refuse(
@@ -261,7 +263,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position(
+                        config_root_position(
                             "pre_scan", "name_hints", Member(name), "detectors", idx, "detector_id"
                         ),
                         (
@@ -276,7 +278,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
                     )
                 )
             )
-        at_patterns = config_position(
+        at_patterns = config_root_position(
             "pre_scan", "name_hints", Member(name), "detectors", Name(det_id), "patterns"
         )
         if not isinstance(patterns, list) or not patterns:
@@ -302,7 +304,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
                 raise_bare(
                     _refuse(
                         config_refusal(
-                            config_position(
+                            config_root_position(
                                 "pre_scan",
                                 "name_hints",
                                 Member(name),
@@ -322,7 +324,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
             raise_bare(
                 _refuse(
                     config_refusal(
-                        config_position(
+                        config_root_position(
                             "pre_scan", "name_hints", Member(name), "detectors", Name(det_id)
                         ),
                         Problem.DUPLICATE,
@@ -336,7 +338,7 @@ def _read_detector_file(handle: DirHandle, name: str) -> dict[str, list[str]]:
 
 def _read_yaml(handle: DirHandle, name: str) -> Any:
     """yaml.safe_load, refusing any parse or read failure with a position and no exception text."""
-    at_member = config_position("pre_scan", "name_hints", Member(name))
+    at_member = config_root_position("pre_scan", "name_hints", Member(name))
     member = read_config(
         lambda: handle.open_file(name), at_member, _refuse, passes=(FileAccessDenied,)
     )

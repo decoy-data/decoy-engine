@@ -16,6 +16,7 @@ supplied names that pass `approve_name` (else a fixed placeholder), the closed `
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePosixPath
@@ -187,10 +188,14 @@ class ConfigPosition:
     key: str
 
 
-# Top-level config keys. A position that starts with one is a complete key from the root, so it
-# is built with `config_root_position`: `config_position` prepends the active column and would
-# print the column twice.
-CONFIG_ROOT_KEYS = frozenset({"tables", "delivery", "generation", "targets", "sources", "version"})
+_config_root_keys: frozenset[str] = frozenset()
+
+
+def register_config_root_keys(fields: Iterable[str]) -> frozenset[str]:
+    """Bind the schema's keys when the config model loads, keeping this layer schema-independent."""
+    global _config_root_keys
+    _config_root_keys = frozenset(fields) | {"generation", "declared_casting"}
+    return _config_root_keys
 
 
 def _display(segments: tuple[Segment, ...]) -> str:
@@ -214,7 +219,7 @@ def config_position(*segments: Segment) -> ConfigPosition:
     (sentry rule S2). It is relative to the active column, so the first segment is a literal
     that is not a config root key; a complete key goes through `config_root_position`."""
     first = segments[0] if segments else None
-    if type(first) is not str or first in CONFIG_ROOT_KEYS:
+    if type(first) is not str or first in _config_root_keys:
         raise TypeError("a relative position starts with a literal field name, not a root key")
     return ConfigPosition(position_key(_display(segments)))
 

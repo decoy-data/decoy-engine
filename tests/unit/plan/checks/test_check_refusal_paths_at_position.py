@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from decoy_engine import fileaccess, reasons
-from decoy_engine._config_text import Name, config_position, config_root_position
+from decoy_engine._config_text import Name, config_position
 from decoy_engine.config._delivery import refuse_unreleased_delivery
 from decoy_engine.errors import PipelineValidationError
 from decoy_engine.plan._checks_bucketize import check_bucketize_config
@@ -26,7 +26,6 @@ from decoy_engine.plan._generation import (
     ReadSnapshot,
     check_fitted_references,
     read_and_pin_snapshots,
-    snapshot_schema_failure,
     statistical_refusal,
 )
 
@@ -127,34 +126,22 @@ def test_statistical_refusal_key_is_root_relative(active: str) -> None:
     assert refusal.key == _GENERATED
 
 
-_SNAPSHOT_KEY = f"{_GENERATED}.snapshot_file"
-
-
+@pytest.mark.parametrize(("table", "column"), [("orders", "parent_id"), ("t" * 50, "c" * 50)])
 def test_oversized_snapshot_message_is_root_relative_under_a_column(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table: str, column: str
 ) -> None:
     (tmp_path / _SNAPSHOT).write_bytes(b"{" + b" " * 64 + b"}")
     monkeypatch.setattr("decoy_engine.plan._generation.EMBEDDED_SNAPSHOT_MAX_BYTES", 8)
     config = _fitted(snapshot_file=_SNAPSHOT)
+    config["tables"][0]["name"] = table
+    config["tables"][0]["generate_columns"][0]["name"] = column
+    expected = f"tables.{table}.generate_columns.{column}.snapshot_file"
     with fileaccess.at_position(_GENERATED), pytest.raises(PlanCompileError) as caught:
         read_and_pin_snapshots(config, base_dir=tmp_path)
-    assert caught.value.path == _SNAPSHOT_KEY
+    assert caught.value.path == expected
     code = reasons.plan.DP_SNAPSHOT_EMBEDDED_ARTIFACT_TOO_LARGE
     assert str(caught.value).startswith(
-        f"[{code}] {_SNAPSHOT_KEY}: too large. The embedded-artifact cap is 16 MiB"
-    )
-
-
-@pytest.mark.parametrize("active", ["", _GENERATED], ids=["no_position", "at_position"])
-def test_schema_mismatch_message_is_root_relative(active: str) -> None:
-    with fileaccess.at_position(active):
-        failure = snapshot_schema_failure(
-            {"schema_version": "nope"},
-            config_root_position("generation", "snapshots", 0, "schema_version"),
-        )
-    assert str(failure) == (
-        f"[{reasons.plan.STATISTICAL_SNAPSHOT_SCHEMA_MISMATCH}] generation.snapshots[0].schema_version: does not match; expected an accepted schema "
-        "version. This engine consumes only the accepted schema versions"
+        f"[{code}] {expected}: too large. The embedded-artifact cap is 16 MiB"
     )
 
 
@@ -253,3 +240,12 @@ def test_truncate_refusal_never_echoes_the_submitted_value(field: str) -> None:
     assert str(caught.value) == (
         f"[{code}] {_COLUMN}.provider_config.{field}: not allowed, got string. {hint}"
     )
+
+
+def test_config_root_keys_match_the_schema_and_stored_plan_roots() -> None:
+    from decoy_engine.config import CONFIG_ROOT_KEYS, PipelineConfig
+
+    assert set(PipelineConfig.model_fields) | {"generation", "declared_casting"} == CONFIG_ROOT_KEYS
+    for root in CONFIG_ROOT_KEYS:
+        with pytest.raises(TypeError):
+            config_position(root)

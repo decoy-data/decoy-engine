@@ -43,6 +43,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError, ValidationError
 
 from decoy_engine import reasons
+from decoy_engine._config_text import register_config_root_keys
 from decoy_engine._field_names import repeated_names
 from decoy_engine.config._delivery import (
     DeliveryConfig,
@@ -552,3 +553,7 @@ class PipelineConfig(BaseModel):
                     "masked output"
                 )
         return self
+
+
+# Stored plans also carry generation and declared-casting blocks at the root.
+CONFIG_ROOT_KEYS = register_config_root_keys(PipelineConfig.model_fields)

@@ -49,10 +49,10 @@ from typing import Any
 import pyarrow as pa
 
 from decoy_engine import reasons
-from decoy_engine.contracts.label_text import is_mask_char
 from decoy_engine.detection.detectors import Span, iter_spans
 from decoy_engine.errors import FpeUnencryptableError, PipelineValidationError
-from decoy_engine.execution._errors import StrategyError, text_mask_unsupported_pair_error
+from decoy_engine.execution._errors import text_mask_unsupported_pair_error
+from decoy_engine.execution._strategies import validated_truncate_params
 from decoy_engine.execution._strategies._text_redact import _splice
 from decoy_engine.execution.native._text_mask_native_fpe import (
     encrypt_spans,
@@ -115,27 +115,7 @@ def native_truncate(
     keep, then mask_char) so the first violation in a doubly-invalid config
     raises the same code from both paths.
     """
-    if not isinstance(length, int) or length < 1:
-        raise StrategyError(
-            code=reasons.runtime.TRUNCATE_LENGTH_INVALID,
-            strategy="truncate",
-            message=(
-                f"truncate requires an integer length >= 1, got {length!r} "
-                f"({type(length).__name__})."
-            ),
-        )
-    if keep not in ("head", "tail"):
-        raise StrategyError(
-            code=reasons.runtime.TRUNCATE_KEEP_INVALID,
-            strategy="truncate",
-            message=f"truncate requires keep in ('head', 'tail'), got {keep!r}.",
-        )
-    if mask_char is not None and not is_mask_char(mask_char):
-        raise StrategyError(
-            code=reasons.runtime.TRUNCATE_MASK_CHAR_INVALID,
-            strategy="truncate",
-            message=("truncate requires mask_char to be a single character that encodes as UTF-8."),
-        )
+    validated_truncate_params(length, keep, mask_char)
     return truncate_array(array, length=length, keep=keep, mask_char=mask_char)
 
 

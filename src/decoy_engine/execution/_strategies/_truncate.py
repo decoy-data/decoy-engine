@@ -20,9 +20,12 @@ the `hash_requires_namespace` pattern in `_hash.py`.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 
 from decoy_engine import reasons
+from decoy_engine._config_text import Problem, config_position, config_refusal
 from decoy_engine.contracts.label_text import is_mask_char
 from decoy_engine.execution._adapter import (
     StrategyContext,
@@ -37,6 +40,55 @@ from decoy_engine.kernel import truncate_array
 from decoy_engine.plan._types import ColumnSeed
 
 _KEEP_SIDES = ("head", "tail")
+
+
+def truncate_params(cfg: dict[str, Any]) -> tuple[int, str, str | None]:
+    """Resolve the legacy from_end setting before validating the kernel arguments."""
+    keep = cfg.get("keep")
+    if keep is None:
+        keep = "tail" if cfg.get("from_end") else "head"
+    return validated_truncate_params(cfg.get("length"), keep, cfg.get("mask_char"))
+
+
+def validated_truncate_params(
+    length: Any, keep: Any, mask_char: Any
+) -> tuple[int, str, str | None]:
+    """Validate all three runtime routes before a truncate kernel sees the source."""
+    if not isinstance(length, int) or length < 1:
+        refusal = config_refusal(
+            config_position("provider_config", "length"),
+            Problem.NOT_ALLOWED,
+            got=length,
+            hint="length must be an integer >= 1.",
+        )
+        raise StrategyError(
+            code=reasons.runtime.TRUNCATE_LENGTH_INVALID, strategy="truncate", message=refusal.text
+        )
+    if keep not in _KEEP_SIDES:
+        keep_refusal = config_refusal(
+            config_position("provider_config", "keep"),
+            Problem.NOT_ALLOWED,
+            got=keep,
+            hint="keep must be 'head' or 'tail'.",
+        )
+        raise StrategyError(
+            code=reasons.runtime.TRUNCATE_KEEP_INVALID,
+            strategy="truncate",
+            message=keep_refusal.text,
+        )
+    if mask_char is not None and not is_mask_char(mask_char):
+        mask_refusal = config_refusal(
+            config_position("provider_config", "mask_char"),
+            Problem.NOT_ALLOWED,
+            got=mask_char,
+            hint="mask_char must be a single character that encodes as UTF-8.",
+        )
+        raise StrategyError(
+            code=reasons.runtime.TRUNCATE_MASK_CHAR_INVALID,
+            strategy="truncate",
+            message=mask_refusal.text,
+        )
+    return length, keep, mask_char
 
 
 class TruncateHandler:
@@ -71,41 +123,7 @@ class TruncateHandler:
         ctx: StrategyContext,
     ) -> tuple[pd.DataFrame, list[QualityWarning]]:
         cfg = provider_config_to_dict(plan.provider_config)
-        length = cfg.get("length")
-        if not isinstance(length, int) or length < 1:
-            # Invalid config: fail closed (Sprint 13 finding 0.4). A masking
-            # strategy must never silently pass the source value through.
-            raise StrategyError(
-                code=reasons.runtime.TRUNCATE_LENGTH_INVALID,
-                strategy="truncate",
-                message=(
-                    f"column {column!r} uses truncate with an invalid length "
-                    f"(type {type(length).__name__}); length must be an integer >= 1."
-                ),
-            )
-        # MG-1/S3: keep + mask_char. Legacy from_end maps to keep="tail";
-        # explicit keep wins. mask_char None preserves V1 byte identity.
-        from_end_legacy = bool(cfg.get("from_end", False))
-        keep = cfg.get("keep")
-        if keep is None:
-            keep = "tail" if from_end_legacy else "head"
-        if keep not in _KEEP_SIDES:
-            raise StrategyError(
-                code=reasons.runtime.TRUNCATE_KEEP_INVALID,
-                strategy="truncate",
-                message=f"column {column!r} uses truncate with an invalid keep; keep must be 'head' or 'tail'.",
-            )
-        mask_char = cfg.get("mask_char")
-        if mask_char is not None:
-            if not is_mask_char(mask_char):
-                raise StrategyError(
-                    code=reasons.runtime.TRUNCATE_MASK_CHAR_INVALID,
-                    strategy="truncate",
-                    message=(
-                        f"column {column!r} uses truncate with an invalid mask_char; "
-                        "mask_char must be a single character that encodes as UTF-8."
-                    ),
-                )  # rejected at plan-compile too; this is the defensive backstop
+        length, keep, mask_char = truncate_params(cfg)
         # SC1 port (2026-07-07): computation now runs through the shared
         # Arrow kernel (`decoy_engine.kernel.truncate_array`) so this handler
         # and the out-of-core route apply byte-identical truncate logic from

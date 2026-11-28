@@ -19,15 +19,15 @@ up-front type resolution).
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, narrow_passthrough
-from decoy_engine.contracts.label_text import is_mask_char
 from decoy_engine.execution._adapter import provider_config_to_dict
-from decoy_engine.execution._errors import ExecutionError, StrategyError
+from decoy_engine.execution._errors import ExecutionError
+from decoy_engine.execution._strategies import truncate_params
 from decoy_engine.execution.native._provider_class import computed_mask_spec
 from decoy_engine.execution.out_of_core._categorical_native import native_categorical_array
 from decoy_engine.execution.out_of_core._faker_native import NativeFaker, native_faker_array
@@ -66,49 +66,6 @@ def table_seed(plan: Plan, table_name: str) -> TableSeed | None:
         if candidate_name == table_name:
             return candidate_seed
     return None
-
-
-def truncate_params(cfg: dict[str, Any]) -> tuple[int, str, str | None]:
-    """Validated truncate kernel params, or raise on an invalid config.
-
-    Fail-closed, matching the pandas oracle (`_strategies/_truncate.py`): an
-    invalid length/keep/mask_char raises `StrategyError` with the SAME codes the
-    oracle raises (`truncate_length_invalid`, `truncate_keep_invalid`,
-    `truncate_mask_char_invalid`), never a silent fallback. A masking primitive
-    must never publish the raw source value on a bad config; centralizing the
-    validation here keeps the mask dispatch and the batch join's output typing
-    agreeing on exactly when the config is rejected.
-    """
-    length = cfg.get("length")
-    if not isinstance(length, int) or length < 1:
-        raise StrategyError(
-            code=reasons.runtime.TRUNCATE_LENGTH_INVALID,
-            strategy="truncate",
-            message=(
-                f"truncate has invalid length {length!r} ({type(length).__name__}); "
-                "length must be an integer >= 1."
-            ),
-        )
-    keep = cfg.get("keep")
-    if keep is None:
-        keep = "tail" if bool(cfg.get("from_end", False)) else "head"
-    if keep not in ("head", "tail"):
-        raise StrategyError(
-            code=reasons.runtime.TRUNCATE_KEEP_INVALID,
-            strategy="truncate",
-            message=f"truncate has invalid keep {keep!r}.",
-        )
-    mask_char = cfg.get("mask_char")
-    if mask_char is not None and not is_mask_char(mask_char):
-        raise StrategyError(
-            code=reasons.runtime.TRUNCATE_MASK_CHAR_INVALID,
-            strategy="truncate",
-            message=(
-                "truncate has an invalid mask_char; "
-                "mask_char must be a single character that encodes as UTF-8."
-            ),
-        )
-    return length, keep, mask_char
 
 
 def mask_column(

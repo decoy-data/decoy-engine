@@ -28,7 +28,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from decoy_engine._config_text._refusal import CONFIG_ROOT_KEYS
+from decoy_engine.config import CONFIG_ROOT_KEYS
 from tests.sentry.defects._config_refusal_scope import Scope, _build_scope, _name_of, _own_walk
 
 # The AE5 loader modules, plus the files split out of them (the corpus checks, the withheld-values

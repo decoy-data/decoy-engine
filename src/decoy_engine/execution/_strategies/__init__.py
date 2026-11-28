@@ -55,7 +55,11 @@ from decoy_engine.execution._strategies._top_code import (
     resolve_top_code_settings,
     top_code_warning,
 )
-from decoy_engine.execution._strategies._truncate import TruncateHandler
+from decoy_engine.execution._strategies._truncate import (
+    TruncateHandler,
+    truncate_params,
+    validated_truncate_params,
+)
 from decoy_engine.execution._strategies._windowed_date import WindowedDateStrategyHandler
 from decoy_engine.execution._strategies.nested import NestedStrategyHandler
 from decoy_engine.plan.checks import REQUIREMENTS_BY_STRATEGY, StrategyRequirement, requirements_for
@@ -207,4 +211,6 @@ __all__ = [
     "resolve_top_code_settings",
     "strategy_catalog",
     "top_code_warning",
+    "truncate_params",
+    "validated_truncate_params",
 ]
