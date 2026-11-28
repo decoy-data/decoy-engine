@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pyarrow as pa
 
@@ -15,12 +15,10 @@ from decoy_engine.execution import _chunked, _chunked_oracle
 from decoy_engine.execution.native._chunked_evidence import ColumnPlan, chunk_route_evidence
 from decoy_engine.execution.native._chunked_oracle_rows import _oracle_preserved_rows
 from decoy_engine.execution.native._chunked_schema_rule import SchemaRule, normalize_chunk
-
-if TYPE_CHECKING:
-    from decoy_engine.execution.native import NativeRouteEvidence
+from decoy_engine.execution.native._dispatch import NativeRouteEvidence
 
 
-def oracle_route(
+def _oracle_route(
     state: Any,
     *,
     config: dict[str, Any],

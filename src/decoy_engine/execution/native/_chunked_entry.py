@@ -83,7 +83,7 @@ from decoy_engine.execution.native._route_decline_codes import (
     table_decline,
 )
 from decoy_engine.execution.native._when_mask import plan_when_masks
-from decoy_engine.execution.native.chunked import oracle_route as _oracle_route
+from decoy_engine.execution.native.chunked._oracle_route import _oracle_route
 from decoy_engine.fileaccess import FileAccess, entry_point
 from decoy_engine.generation.pool import PoolCache, ValuePool
 from decoy_engine.instrumentation.timing import StrategyTimingRecord
