@@ -276,7 +276,7 @@ def guarded_with_parser_errors(
     parser_errors: tuple[type[Exception], ...],
     fn: Callable[..., T],
     *args: Any,
-    passthrough: Callable[[Exception], bool] | None = None,
+    decoder_passthrough: Callable[[Exception], bool] | None = None,
     **kwargs: Any,
 ) -> T:
     """`guarded`, except the named parser error types also pass through unchanged.
@@ -286,7 +286,7 @@ def guarded_with_parser_errors(
     Every other library failure maps exactly as in `guarded`. The one place a library error
     type is allowed past a strict policy; adapters name the types, never a caller.
 
-    `passthrough` is the same door for failures a type cannot name (a decoder `OSError` with no
+    `decoder_passthrough` is the same door for failures a type cannot name (a decoder `OSError` with no
     errno, an optional backend's error): it is asked while the library's own exception is still
     in hand, and a True answer re-raises it for a caller that replaces it with a coded refusal."""
     if not strict:
@@ -301,7 +301,7 @@ def guarded_with_parser_errors(
     except parser_errors:
         raise
     except Exception as exc:
-        if passthrough is not None and passthrough(exc):
+        if decoder_passthrough is not None and decoder_passthrough(exc):
             raise
         resurfaced = _resurface(exc)
         if resurfaced is exc:
@@ -322,7 +322,7 @@ def guarded_iter(
     strict: bool,
     it: Iterable[T],
     parser_errors: tuple[type[Exception], ...] = (),
-    passthrough: Callable[[Exception], bool] | None = None,
+    decoder_passthrough: Callable[[Exception], bool] | None = None,
 ) -> Iterator[T]:
     """Step an iterator under `guarded` semantics (`guarded_with_parser_errors` when
     `parser_errors` is given). Under the local policy it is a plain `yield from`, so CLI text
@@ -334,7 +334,12 @@ def guarded_iter(
     while True:
         try:
             item = guarded_with_parser_errors(
-                display, True, parser_errors, next, iterator, passthrough=passthrough
+                display,
+                True,
+                parser_errors,
+                next,
+                iterator,
+                decoder_passthrough=decoder_passthrough,
             )
         except StopIteration:
             return

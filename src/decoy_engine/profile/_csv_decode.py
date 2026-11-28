@@ -3,22 +3,23 @@ coded, value-free refusal, never the decoder's own text, which can quote the byt
 
 `_read_csv_rows` applies it at the one file-read boundary, so the resident reader, a direct read
 and the lazy backend refuse the same way. `is_decoder_failure` is also handed to the file-access
-adapter as its `passthrough`, so a strict policy cannot replace the decoder's type before it is seen.
+adapter as its `decoder_passthrough`, so a strict policy cannot replace the decoder's type before it is seen.
 The codec read from a declared file name lives here too.
 """
 
 from __future__ import annotations
 
+import contextlib
 import lzma
 import os
 import sys
 import tarfile
 import zipfile
 import zlib
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import pandas as pd
-from pandas.io.common import infer_compression
+from pandas.io.common import get_handle, infer_compression
 
 from decoy_engine import reasons
 from decoy_engine._execution_error import ExecutionError
@@ -111,3 +112,13 @@ def csv_is_compressed(path: str | os.PathLike[str]) -> bool:
     takes the codec from the declared name and passes it on, so a rooted file policy (which hands
     pandas a descriptor path with no suffix) still reads a compressed file."""
     return csv_compression(path) is not None
+
+
+@contextlib.contextmanager
+def decompressed(raw: Any, compression: str | None) -> Iterator[Any]:
+    """`raw` as plain bytes: through pandas' own decompressor when the format is named."""
+    if compression in (None, "infer"):
+        yield raw
+        return
+    with get_handle(raw, "rb", compression=compression, is_text=False) as handles:
+        yield handles.handle

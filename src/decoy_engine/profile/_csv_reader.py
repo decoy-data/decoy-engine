@@ -31,7 +31,6 @@ value, a path or a file name, and the library error is never chained.
 
 from __future__ import annotations
 
-import contextlib
 import csv
 import dataclasses
 import io
@@ -43,7 +42,6 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, TextIO, overload
 
 import pandas as pd
-from pandas.io.common import get_handle
 
 from decoy_engine import fileaccess
 from decoy_engine._lexeme import pandas_lexeme_kwargs
@@ -55,6 +53,7 @@ from decoy_engine.fileaccess.adapters.memory import MemoryHandle
 from decoy_engine.profile._csv_decode import (
     csv_compression,
     csv_is_compressed,
+    decompressed,
     is_decoder_failure,
     refusing,
 )
@@ -241,16 +240,6 @@ def _positional_lexemes(columns: tuple[str, ...], names: list[str]) -> dict[str,
     return pandas_lexeme_kwargs([names.index(c) for c in columns if c in names])
 
 
-@contextlib.contextmanager
-def _decompressed(raw: Any, compression: str | None) -> Iterator[Any]:
-    """`raw` as plain bytes: through pandas' own decompressor when the format is named."""
-    if compression in (None, "infer"):
-        yield raw
-        return
-    with get_handle(raw, "rb", compression=compression, is_text=False) as handles:
-        yield handles.handle
-
-
 def _scan_record_widths(
     open_handle: OpenHandle,
     dialect: CsvDialect,
@@ -269,7 +258,7 @@ def _scan_record_widths(
     with (
         open_handle() as handle,
         handle.open_binary() as raw,
-        _decompressed(raw, compression) as plain,
+        decompressed(raw, compression) as plain,
     ):
         text = io.TextIOWrapper(plain, encoding="utf-8-sig", newline="")
         reader = _record_reader(
@@ -412,7 +401,7 @@ def _read_whole(
     failed = False
     try:
         with open_handle() as handle:
-            frame = read(handle, passthrough=passes, **kwargs)
+            frame = read(handle, decoder_passthrough=passes, **kwargs)
     except _PARSER_ERRORS:
         if names is None:
             raise
@@ -438,7 +427,7 @@ def _read_chunks(
     failed = False
     try:
         with open_handle() as handle:
-            for chunk in read(handle, passthrough=passes, **kwargs):
+            for chunk in read(handle, decoder_passthrough=passes, **kwargs):
                 yield chunk if names is None else _named(chunk, kept or names, table)
     except _PARSER_ERRORS:
         if names is None:
@@ -473,7 +462,7 @@ def _read_rows(
     lexeme_columns: tuple[str, ...] = (),
     columns: Sequence[str] | None = None,
     exact_text: bool = False,
-    compression: str | None = "infer",
+    compression: str | None,
     refuse_decoder: bool = True,
 ) -> pd.DataFrame | Iterator[pd.DataFrame]:
     """The shared core: one frame, or an iterator of frames when `chunksize` is set.
@@ -631,7 +620,13 @@ def read_csv_bytes(raw: bytes, *, table: str, field_key: str = "lookup.file") ->
     """
     handle = MemoryHandle(raw, field_key)
     frame = _read_csv_rows(
-        lambda: handle, CsvDialect(), table=table, dtype=str, exact_text=True, refuse_decoder=False
+        lambda: handle,
+        CsvDialect(),
+        table=table,
+        dtype=str,
+        exact_text=True,
+        compression=None,
+        refuse_decoder=False,
     )
     assert isinstance(frame, pd.DataFrame)  # noqa: S101 - chunksize is None
     return frame

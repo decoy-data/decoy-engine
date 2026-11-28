@@ -238,12 +238,12 @@ def test_a_decoder_failure_in_the_rooted_policy_carries_no_cell_text(tmp_path: P
 
 def test_a_rooted_zstd_failure_after_a_valid_batch_is_the_coded_refusal(tmp_path: Path) -> None:
     zstd = pytest.importorskip("zstandard")
-    big = b"a,b\n" + b"".join(f"{i},x{i}\n".encode() for i in range(20000))
-    packed = bytearray(zstd.ZstdCompressor(level=1).compress(big))
-    packed[-40:-8] = b"\xff" * 32
+    # A valid first frame, then bytes that are not a frame: the header probe passes and the
+    # decoder fails while the chunked read iterates.
+    packed = zstd.ZstdCompressor(level=1).compress(b"a,b\n" + b"1,x\n" * 70000) + b"invalid frame"
     access, fd = _rooted(tmp_path)
     try:
-        (tmp_path / "f.csv.zst").write_bytes(bytes(packed))
+        (tmp_path / "f.csv.zst").write_bytes(packed)
         lazy = _lazy(tmp_path, access, "f.csv.zst")
         batches = lazy.iter_batches(7)
         first = next(iter(batches))
@@ -361,3 +361,25 @@ def test_the_resident_declared_source_refuses_a_damaged_gzip_with_the_coded_erro
     with pytest.raises(ExecutionError) as err:
         source.to_frame()
     _assert_refusal(err.value)
+
+
+@pytest.mark.parametrize("headered", [True, False], ids=["header", "headerless"])
+def test_the_resident_declared_source_reads_a_valid_gzip(
+    policy: tuple[Path, FileAccess | None], headered: bool
+) -> None:
+    """The resident reader gets the codec from the declared name under every policy: a rooted
+    read hands pandas a suffixless descriptor path, and the headerless width scan reads bytes."""
+    directory, access = policy
+    path = directory / "f.csv.gz"
+    body = b"1,x\n2,y\n"
+    path.write_bytes(gzip.compress(b"a,b\n" + body if headered else body))
+    descriptor: dict[str, Any] = {
+        "type": "file",
+        "format": "csv",
+        "path": path.name if access is not None else str(path),
+        "has_header": headered,
+    }
+    if not headered:
+        descriptor["column_names"] = ["a", "b"]
+    source = build_declared_source("t", descriptor, file_access=access)
+    assert source.to_frame().astype(str).values.tolist() == [["1", "x"], ["2", "y"]]

@@ -22,7 +22,7 @@ def _strict(handle: FileHandle) -> bool:
 def read_csv(
     handle: FileHandle,
     *,
-    passthrough: Callable[[Exception], bool] | None = None,
+    decoder_passthrough: Callable[[Exception], bool] | None = None,
     **kwargs: Any,
 ) -> pd.DataFrame:
     return guarded_with_parser_errors(
@@ -31,7 +31,7 @@ def read_csv(
         (),
         pd.read_csv,
         handle.library_path(),
-        passthrough=passthrough,
+        decoder_passthrough=decoder_passthrough,
         **kwargs,
     )
 
@@ -45,23 +45,25 @@ def read_parquet(handle: FileHandle, **kwargs: Any) -> pd.DataFrame:
 def read_csv_chunks(
     handle: FileHandle,
     *,
-    passthrough: Callable[[Exception], bool] | None = None,
+    decoder_passthrough: Callable[[Exception], bool] | None = None,
     **kwargs: Any,
 ) -> Iterator[pd.DataFrame]:
     """`read_csv(chunksize=...)`, the call and each step guarded under a strict handle.
 
     The one sanctioned chunked pandas read on a policy handle (as `iter_batches` is for Arrow).
-    `passthrough` lets a caller that replaces a decoder failure with its own coded refusal receive
+    `decoder_passthrough` lets a caller that replaces a decoder failure with its own coded refusal receive
     it, at the call and on each step (see `guarded_with_parser_errors`).
     """
-    reader = read_csv(handle, passthrough=passthrough, **kwargs)
-    return guarded_iter(handle.display, _strict(handle), reader, passthrough=passthrough)
+    reader = read_csv(handle, decoder_passthrough=decoder_passthrough, **kwargs)
+    return guarded_iter(
+        handle.display, _strict(handle), reader, decoder_passthrough=decoder_passthrough
+    )
 
 
 def read_csv_parser_errors(
     handle: FileHandle,
     *,
-    passthrough: Callable[[Exception], bool] | None = None,
+    decoder_passthrough: Callable[[Exception], bool] | None = None,
     **kwargs: Any,
 ) -> pd.DataFrame:
     """`read_csv` that lets `PARSER_ERRORS` through a strict policy. The caller must sanitize."""
@@ -71,7 +73,7 @@ def read_csv_parser_errors(
         PARSER_ERRORS,
         pd.read_csv,
         handle.library_path(),
-        passthrough=passthrough,
+        decoder_passthrough=decoder_passthrough,
         **kwargs,
     )
 
@@ -79,11 +81,15 @@ def read_csv_parser_errors(
 def read_csv_chunks_parser_errors(
     handle: FileHandle,
     *,
-    passthrough: Callable[[Exception], bool] | None = None,
+    decoder_passthrough: Callable[[Exception], bool] | None = None,
     **kwargs: Any,
 ) -> Iterator[pd.DataFrame]:
     """`read_csv_chunks` that lets `PARSER_ERRORS` through at the call and on each step."""
-    reader = read_csv_parser_errors(handle, passthrough=passthrough, **kwargs)
+    reader = read_csv_parser_errors(handle, decoder_passthrough=decoder_passthrough, **kwargs)
     return guarded_iter(
-        handle.display, _strict(handle), reader, PARSER_ERRORS, passthrough=passthrough
+        handle.display,
+        _strict(handle),
+        reader,
+        PARSER_ERRORS,
+        decoder_passthrough=decoder_passthrough,
     )
