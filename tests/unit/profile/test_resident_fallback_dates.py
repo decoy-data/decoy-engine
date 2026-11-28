@@ -31,3 +31,15 @@ def test_only_the_unrepresentable_column_becomes_text() -> None:
 def test_the_sample_route_keeps_the_categorical_too() -> None:
     frame = ResidentTableSource(_table(), "t").sample_frame(3)
     assert str(frame["d"].dtype) == "category" and len(frame) == 3
+
+
+def test_the_fallback_keeps_a_stored_date_index_and_the_other_columns() -> None:
+    import pandas as pd
+
+    index = pd.CategoricalIndex([dt.date(2020, 1, 1), dt.date(2020, 1, 2)], name="day")
+    base = pa.Table.from_pandas(pd.DataFrame({"v": [1, 2]}, index=index))
+    table = base.append_column("t", pa.array([1, 2], pa.time64("ns")))  # 1 ns: not in pandas
+    frame = ResidentTableSource(table, "t").to_frame()
+    assert list(frame.columns) == ["v", "t"] and frame.index.name == "day"
+    assert str(frame.index.dtype) == "category"
+    assert frame["t"].map(type).eq(str).all() and frame["v"].tolist() == [1, 2]

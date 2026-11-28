@@ -124,9 +124,11 @@ def test_window_admission_and_plan_compile_agree_on_a_far_live_year() -> None:
     assert compile_error.value.code == window_error.value.code == CODE
     from decoy_engine.contracts.distribution_snapshot import SAMPLED_YEARS_RULE
 
-    assert SAMPLED_YEARS_RULE in str(compile_error.value) and SAMPLED_YEARS_RULE in str(
-        window_error.value
-    )
+    assert SAMPLED_YEARS_RULE == "sampled years must lie in 1..9998"
+    # The sentry needs a literal message, so this equality is what ties the statistical refusal
+    # to the shared rule: the whole text, not a substring.
+    assert compile_error.value.message == SAMPLED_YEARS_RULE
+    assert window_error.value.message == f"t.c: {SAMPLED_YEARS_RULE}"
 
 
 def test_a_zero_weight_far_year_is_not_live_on_either_route() -> None:

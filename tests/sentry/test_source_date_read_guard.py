@@ -29,7 +29,7 @@ _SINKS = frozenset({"to_pandas", "to_pandas_fk_safe"})
 # The conversion wrappers in `internal/pandas_compat.py`. The guard asserts this set equals the
 # functions in that file that call `to_pandas`, so it cannot drift from the file.
 _CONVERSION_HELPERS = frozenset(
-    {"table_to_pandas", "table_to_pandas_exact_ints", "_working_categorical"}
+    {"table_to_pandas", "table_to_pandas_exact_ints", "_pandas_categories"}
 )
 _HELPERS_FILE = "internal/pandas_compat.py"
 # Checks that return the data to use from here on. A bare call statement drops the repair.
@@ -145,6 +145,10 @@ _DOWNSTREAM_FUNCTIONS: dict[Site, str] = {
     (
         "internal/pandas_compat.py",
         "_working_categorical",
+    ): "the conversion helper; callers pass checked tables",
+    (
+        "internal/pandas_compat.py",
+        "_pandas_categories",
     ): "the conversion helper; callers pass checked tables",
     (
         "internal/pandas_compat.py",

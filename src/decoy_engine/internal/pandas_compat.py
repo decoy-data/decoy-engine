@@ -13,7 +13,6 @@ from __future__ import annotations
 import importlib
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 from typing import Any, Final, NoReturn
 
 import numpy as np
@@ -116,74 +115,76 @@ def exact_int_types_mapper(arrow_type: pa.DataType) -> pd.api.extensions.Extensi
     return dtype_cls() if dtype_cls is not None else None
 
 
-@dataclass(frozen=True, order=True)
-class WorkingInstant:
-    """One timestamp category kept as its physical value: nanoseconds since the epoch and the
-    zone name. pandas cannot hold a nanosecond value at its own bounds (INT64_MIN is NaT, and a
-    zone shift past them raises with the value in the message), so a column with such an entry
-    is built from these instead, which keeps every entry exact."""
+def _refuse_unholdable(name: str, column: Any) -> NoReturn:
+    """Refuse a date column whose referenced entry pandas cannot hold. The error is built from
+    the column name and a row count only, so it quotes no value."""
+    from decoy_engine.io.bounded_reader import SourceDateUnrepresentableError
 
-    ns: int
-    tz: str | None = None
+    held = len(column) - column.null_count
+    raise SourceDateUnrepresentableError(table="working frame", column=name, count=held)
 
 
-_BOUND_MARGIN_NS = 2 * 86_400 * 10**9  # beyond any zone offset: nearer entries need no shift
+def _referenced_entries(chunk: Any) -> pa.Array:
+    """The non-null entries `chunk`'s rows point at, in dictionary order. An entry no row uses
+    is not here, so what pandas must hold never depends on it."""
+    used = pc.unique(chunk.indices.drop_null())
+    used = pc.take(used, pc.sort_indices(used))
+    return pc.take(chunk.dictionary, used).drop_null()
 
 
-def _instants(categories: pa.Array) -> pd.Index | None:
-    """The categories as `WorkingInstant`s when a nanosecond entry sits at pandas' bounds, else
-    None. Nothing here converts a value, so no error can quote one."""
-    arrow_type = categories.type
-    if not (pa.types.is_timestamp(arrow_type) and arrow_type.unit == "ns" and len(categories)):
+def _pandas_categories(categories: pa.Array) -> pd.Index | None:
+    """`categories` as a pandas index, or None when pandas cannot hold one of them. INT64_MIN
+    is pandas' NaT, and a zone shift near the nanosecond bounds raises; the error is dropped
+    unread, because its text can quote the value."""
+    if pa.types.is_timestamp(categories.type) and len(categories):
+        if pc.any(pc.equal(categories.cast(pa.int64()), _ARROW_INT64_MIN)).as_py():
+            return None
+    try:
+        return pd.Index(categories.to_pandas())
+    except (ValueError, OverflowError, pa.ArrowInvalid):
         return None
-    ints = categories.cast(pa.int64())
-    extremes = pc.min_max(ints).as_py()
-    if (
-        extremes["min"] > -(2**63) + _BOUND_MARGIN_NS
-        and extremes["max"] < 2**63 - 1 - _BOUND_MARGIN_NS
-    ):
-        return None
-    values = [WorkingInstant(v, arrow_type.tz) for v in ints.to_pylist()]
-    return pd.Index(values, dtype=object)
 
 
-def _working_categorical(column: Any) -> pd.Categorical:
+def _working_categorical(name: str, column: Any) -> pd.Categorical:
     """A pandas categorical for a date dictionary column that passed the checked read.
 
     Arrow keeps the null entries the repair retains, and pandas refuses a null category, so the
     working copy is built apart from the Arrow source (which keeps its own dictionaries for the
-    output). Categories are the non-null entries in first dictionary order, retaining valid
-    unused ones; a null index or a reference to a null entry is a missing row; codes are int64;
-    several chunks unify their categories in first-seen order and share one code per value. A
-    column with no chunk has no category and no row."""
+    output). Categories are the non-null entries some row references, in first dictionary
+    order: an unused entry never reaches pandas, so a row has one identity whether or not the
+    dictionary carries one. A null index or a reference to a null entry is a missing row; codes
+    are int64; several chunks unify their categories in first-seen order and share one code per
+    value. A column with no chunk has no category and no row. A referenced entry pandas cannot
+    hold is refused (`_refuse_unholdable`)."""
     chunks = column.chunks if isinstance(column, pa.ChunkedArray) else [column]
-    entries = [chunk.dictionary for chunk in chunks]
-    parts = [e.drop_null() for e in entries]
+    parts = [_referenced_entries(chunk) for chunk in chunks]
     categories = pc.unique(
         pa.concat_arrays(parts) if parts else pa.array([], column.type.value_type)
     )
     codes = [
-        pc.take(pc.index_in(e, value_set=categories), chunk.indices).cast(pa.int64())
-        for e, chunk in zip(entries, chunks, strict=True)
+        pc.take(pc.index_in(chunk.dictionary, value_set=categories), chunk.indices).cast(pa.int64())
+        for chunk in chunks
     ]
     flat = (
         pc.fill_null(pa.chunked_array(codes, pa.int64()), -1).to_numpy()
         if codes
         else np.empty(0, dtype=np.int64)
     )
-    exact = _instants(categories)
-    return pd.Categorical.from_codes(
-        flat,
-        categories=pd.Index(categories.to_pandas()) if exact is None else exact,
-        ordered=column.type.ordered,
-    )
+    index = _pandas_categories(categories)
+    if index is None:
+        _refuse_unholdable(name, column)
+    return pd.Categorical.from_codes(flat, categories=index, ordered=column.type.ordered)
 
 
-def _stored_index_columns(table: pa.Table) -> list[str]:
-    """The physical field names of the index levels pandas stored with `table`, in level order
-    (a range index is metadata only and is not listed)."""
-    meta = table.schema.pandas_metadata or {}
-    return [c for c in meta.get("index_columns", []) if isinstance(c, str)]
+def stored_index_names(table: pa.Table) -> list[str]:
+    """The physical fields `table` holds that its pandas metadata stores as the frame index, in
+    level order. A name the table lacks (stale metadata, or a projection that dropped the
+    level) is not one, and a range index is metadata only. The one resolver for restoring the
+    index and for checking row order."""
+    listed = (table.schema.pandas_metadata or {}).get("index_columns", [])
+    return [
+        c for c in dict.fromkeys(x for x in listed if isinstance(x, str)) if c in table.schema.names
+    ]
 
 
 def table_to_pandas(table: pa.Table) -> pd.DataFrame:
@@ -192,9 +193,9 @@ def table_to_pandas(table: pa.Table) -> pd.DataFrame:
     A date dictionary that passed the checked read can hold a null entry (kept for the output)
     that `to_pandas` refuses, so those columns convert through `_working_categorical`. Every
     other column converts as pyarrow does. A stored index level is restored from its physical
-    field (the `index_columns` of the pandas metadata) in level order, and keeps the display
-    name pyarrow gave it, so an unnamed level or one named like a data column is not mistaken
-    for a column."""
+    field (`stored_index_names`) in level order, and keeps the display name pyarrow gave it. A
+    data column is restored into its own position, so a label that is not a string (an integer,
+    a tuple) is not mistaken for a new column."""
     dated = [i for i, t in enumerate(table.schema.types) if is_date_dictionary(t)]
     if not dated:
         return table.to_pandas()
@@ -202,8 +203,11 @@ def table_to_pandas(table: pa.Table) -> pd.DataFrame:
     for i in dated:
         swapped = swapped.set_column(i, table.schema.names[i], pa.nulls(table.num_rows))
     frame = swapped.to_pandas()
-    levels = {table.schema.names[i]: _working_categorical(table.column(i)) for i in dated}
-    physical = _stored_index_columns(table)
+    physical = stored_index_names(table)
+    levels = {
+        table.schema.names[i]: _working_categorical(table.schema.names[i], table.column(i))
+        for i in dated
+    }
     if any(name in levels for name in physical):
         arrays = [
             levels[name] if name in levels else frame.index.get_level_values(position)
@@ -215,9 +219,13 @@ def table_to_pandas(table: pa.Table) -> pd.DataFrame:
             if len(arrays) > 1
             else pd.Index(arrays[0], name=names[0])
         )
-    for name, categorical in levels.items():
-        if name not in physical:
-            frame[name] = pd.Series(categorical, index=frame.index)
+    position = 0  # among the data columns, which keep the table's order
+    for i, name in enumerate(table.schema.names):
+        if name in physical:
+            continue
+        if i in dated:
+            frame.isetitem(position, levels[name])
+        position += 1
     return frame
 
 

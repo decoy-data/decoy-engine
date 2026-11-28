@@ -14,7 +14,7 @@ import pyarrow as pa
 from decoy_engine import reasons
 from decoy_engine._arrow_types import TextWidthState, is_text
 from decoy_engine.execution._errors import ExecutionError
-from decoy_engine.internal.pandas_compat import table_to_pandas
+from decoy_engine.internal.pandas_compat import stored_index_names, table_to_pandas
 from decoy_engine.safe_output import attach_output_metadata, own_date_columns
 
 
@@ -40,17 +40,6 @@ def _with_source_types(
             position = table.schema.get_field_index(name)
             table = table.set_column(position, name, table.column(position).cast(want))
     return table
-
-
-def _stored_index_names(source: pa.Table) -> list[str]:
-    """The source columns its pandas metadata stores as the frame index. A name the schema does
-    not hold (stale metadata) is not one."""
-    listed = (source.schema.pandas_metadata or {}).get("index_columns", [])
-    return [
-        c
-        for c in dict.fromkeys(x for x in listed if isinstance(x, str))
-        if c in source.schema.names
-    ]
 
 
 def _expected_index(source: pa.Table, stored: list[str]) -> pd.Index:
@@ -115,7 +104,7 @@ def table_from_pandas_keeping_source_types(
     # A source that stores its pandas index as a column reads back with that column as the frame
     # index, so the frame no longer holds it. The output drops it, unless a rule left it untouched
     # (a configured passthrough column is never dropped).
-    stored_index = _stored_index_names(source)
+    stored_index = stored_index_names(source)
     if frame.shape[0] != n_rows:
         raise _rows_changed(
             f"The frame has {frame.shape[0]} rows and the source has {n_rows}.",

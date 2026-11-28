@@ -87,3 +87,24 @@ def test_a_dotted_projection_to_a_date_free_child_still_reads(tmp_path: Path) ->
     path = tmp_path / "s.parquet"
     pq.write_table(pa.table({"s": pa.array([{"when": dt.date(2020, 1, 1), "n": 5}])}), str(path))
     assert LazySource(path, table="t").to_table(["s.n"]).column("n").to_pylist() == [5]
+
+
+def test_a_hive_partition_key_projects_as_the_whole_file_read_projects_it(tmp_path: Path) -> None:
+    """`pq.read_table(directory, columns=["key"])` reads the partition key. The gate builds its
+    dataset the same way, so it neither refuses the projection nor reads a different table."""
+    part = tmp_path / "dataset" / "key=7"
+    part.mkdir(parents=True)
+    pq.write_table(pa.table({"v": [1, 2]}), str(part / "part.parquet"))
+    source = LazySource(tmp_path / "dataset", table="t")
+    expected = pq.read_table(str(tmp_path / "dataset"), columns=["key"])
+    assert source.to_table(["key"]).to_pydict() == expected.to_pydict() == {"key": [7, 7]}
+    assert source.to_table().column_names == ["v", "key"]
+
+
+def test_a_hive_directory_with_a_refused_column_is_still_refused(tmp_path: Path) -> None:
+    part = tmp_path / "dataset" / "key=7"
+    part.mkdir(parents=True)
+    _write(part / "part.parquet")
+    with pytest.raises(Exception) as caught:
+        LazySource(tmp_path / "dataset", table="t").to_table()
+    _assert_refused(caught.value)

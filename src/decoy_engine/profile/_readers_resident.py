@@ -17,18 +17,19 @@ if TYPE_CHECKING:
 
 def _frame_of(table: pa.Table) -> pd.DataFrame:
     """`table` as a DataFrame; a column pandas cannot hold (a date past year 9999, a
-    sub-microsecond time) is profiled as text, so the route that never converts still runs."""
+    sub-microsecond time) is profiled as text, so the route that never converts still runs. Only
+    such a column is replaced, on the table itself, so its pandas metadata (the stored index)
+    stays."""
     try:
         return table_to_pandas(table)
     except (ValueError, OverflowError):
-        columns = []
-        for name, column in zip(table.column_names, table.columns, strict=True):
+        for position, name in enumerate(table.column_names):
+            column = table.column(position)
             try:  # the shared conversion, so an admitted date dictionary is not mistaken for one
                 table_to_pandas(pa.Table.from_arrays([column], names=[name]))
             except (ValueError, OverflowError):
-                column = column.cast(pa.string())
-            columns.append(column)
-        return table_to_pandas(pa.Table.from_arrays(columns, names=table.column_names))
+                table = table.set_column(position, name, column.cast(pa.string()))
+        return table_to_pandas(table)
 
 
 @dataclass(frozen=True)

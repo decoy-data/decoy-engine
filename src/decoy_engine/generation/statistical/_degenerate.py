@@ -173,7 +173,7 @@ def _refuse_far_year() -> NoReturn:
 
     raise StatisticalSpecError(
         code=reasons.plan.GENERATION_UNBOUNDED_COLUMN,
-        message="year_bins: sampled years must lie in 1..9998.",
+        message="sampled years must lie in 1..9998",
     ) from None
 
 

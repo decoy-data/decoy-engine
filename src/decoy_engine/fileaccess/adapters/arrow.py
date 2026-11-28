@@ -67,15 +67,23 @@ def read_table_gated(
     handle: FileHandle, check: Callable[[pa.Schema], None], **kwargs: Any
 ) -> pa.Table:
     """`read_table`, after `check` has seen the schema that read returns, before any column
-    decodes. The schema comes from a dataset scanner given the same `columns`, so a dotted
-    column or a directory of files is projected exactly as the read projects it. Nothing is
-    read when `check` raises, and an unreadable path fails as `read_table` fails."""
+    decodes. One dataset serves both: it is built as `pq.read_table` builds it (Hive partition
+    discovery), so a partition key, a dotted column or a directory of files projects as the read
+    projects it, and the table comes from the scanner whose schema was checked. Nothing is read
+    when `check` raises, and an unreadable path fails as `read_table` fails."""
 
     strict = _strict(handle)
-    dataset = guarded(handle.display, strict, ds.dataset, handle.library_path(), format="parquet")
+    dataset = guarded(
+        handle.display,
+        strict,
+        ds.dataset,
+        handle.library_path(),
+        format="parquet",
+        partitioning="hive",
+    )
     scanner = guarded(handle.display, strict, dataset.scanner, columns=kwargs.get("columns"))
     check(scanner.projected_schema)
-    return read_table(handle, **kwargs)
+    return guarded(handle.display, strict, scanner.to_table)
 
 
 def parquet_file(handle: FileHandle, **kwargs: Any) -> pq.ParquetFile:
