@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from typing import Literal
 
 import stdnum.ean as _ean
 import stdnum.iban as _iban
@@ -343,12 +344,39 @@ def scheme_length_ok(scheme: str, n: int) -> bool:
 
 _KNOWN_SCHEMES: frozenset[str] = frozenset(_VALIDATORS.keys())
 
+# Recognized for validation but never permutable under FPE: per-country BBAN structure cannot be
+# satisfied by a format-preserving permutation.
+FPE_UNSUPPORTED_SCHEMES: frozenset[str] = frozenset({"iban"})
+
+
+def required_charset(scheme: str) -> frozenset[str] | None:
+    """The characters a configured FPE charset must cover for ``scheme`` (None: no requirement)."""
+    return _SCHEME_REQUIRED_CHARSET.get(scheme)
+
+
+def recognized_schemes() -> list[str]:
+    """Every scheme name the registry validates, sorted, for value-free error text."""
+    return sorted(_KNOWN_SCHEMES)
+
+
+def classify_fpe_scheme(scheme: object) -> Literal["supported", "unsupported", "unknown"]:
+    """The one FPE verdict on a configured checksum scheme.
+
+    ``unknown``: not a string, or not in the registry. ``unsupported``: recognized but never
+    permutable under FPE (``iban``). ``supported``: FPE can mask it. Plan compile, the runtime
+    permutation and unmask each map a verdict to their own error code, so the three cannot
+    disagree on which schemes are refused."""
+    if not isinstance(scheme, str) or scheme not in _KNOWN_SCHEMES:
+        return "unknown"
+    return "unsupported" if scheme in FPE_UNSUPPORTED_SCHEMES else "supported"
+
+
 # Per-scheme minimum required charset for FPE mode.  A configured FPE charset
 # that does not contain all characters in this set causes values to pass
 # through unmasked at runtime: with preserve_separators=True, missing characters
 # are treated as separators, fragmenting the value into short runs that fall
 # below the per-scheme L1 min-length guard and returning the input verbatim.
-# check_fpe_checksum_scheme in plan/_checks.py rejects the misconfiguration
+# check_fpe_checksum_scheme in plan/_checks_fpe.py rejects the misconfiguration
 # at plan-compile rather than letting it silently no-op at run time.
 #
 # iban is absent: FPE mode is unconditionally unsupported for iban regardless
@@ -385,9 +413,7 @@ def validate(scheme: str, value: str) -> bool:
         ValueError: If ``scheme`` is not a recognised checksum scheme.
     """
     if scheme not in _KNOWN_SCHEMES:
-        raise ValueError(
-            f"unknown checksum scheme {scheme!r}. Known schemes: {sorted(_KNOWN_SCHEMES)}"
-        )
+        raise ValueError(f"unknown checksum scheme. Known schemes: {sorted(_KNOWN_SCHEMES)}")
     return _VALIDATORS[scheme](value)
 
 
@@ -415,7 +441,5 @@ def calc_check_digit(scheme: str, body: str) -> str:
         ValueError: If ``scheme`` is not a recognised checksum scheme.
     """
     if scheme not in _KNOWN_SCHEMES:
-        raise ValueError(
-            f"unknown checksum scheme {scheme!r}. Known schemes: {sorted(_KNOWN_SCHEMES)}"
-        )
+        raise ValueError(f"unknown checksum scheme. Known schemes: {sorted(_KNOWN_SCHEMES)}")
     return _CHECK_DIGIT_FUNCS[scheme](body)
