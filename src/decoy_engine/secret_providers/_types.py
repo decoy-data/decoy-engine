@@ -19,13 +19,13 @@ from typing import Any, Literal, Protocol, cast, runtime_checkable
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 from decoy_engine import reasons
+from decoy_engine._error_base import raise_bare
 from decoy_engine.keyprovider import MaskSecretError
 from decoy_engine.secret_providers._buffer import SecretBuffer
 from decoy_engine.secret_providers._errors import (
     BAD_REF_MESSAGE,
     SecretClosedError,
     SecretProviderUnavailable,
-    raise_bare,
 )
 
 API_VERSION: Literal["secret-provider/v1"] = "secret-provider/v1"

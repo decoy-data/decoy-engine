@@ -32,6 +32,7 @@ from decoy_engine.generation.kinds import (
     output_type_of,
     parametric_payload_bound,
 )
+from decoy_engine.generation.pool import STR_OBJECT_OVERHEAD_BYTES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -40,14 +41,10 @@ if TYPE_CHECKING:
 
     from decoy_engine.generation._admission import ColumnAdmission, PlanAdmission
 
-# CPython str object header + list pointer (execution._mem_estimate_dtypes).
-STR_OBJECT_OVERHEAD_BYTES = 57
 # Python list + Arrow buffer + null/cast copy live together while a batch is converted.
 _BATCH_COPIES = 3
 # Whole-table legacy generation also holds the finished pa.table plus pandas intermediates.
 _LEGACY_COPIES = 4
-_POOL_SLACK = 1.5
-_POOL_FIXED_BYTES = 80 * 1024
 # Dict-of-seen + list slot + str object per distinct parent key.
 _KEY_POOL_PER_KEY_EXTRA = 8 + 72
 
@@ -260,10 +257,6 @@ def sink_buffer_bytes(payloads: list[int], batch_rows: int) -> int:
 def accumulator_bytes(rows: int, payloads: list[int]) -> int:
     """Whole-table Arrow footprint: data + offsets + validity per value."""
     return rows * sum(p + 12 for p in payloads)
-
-
-def faker_pool_bytes(pool_size: int, payload: int) -> int:
-    return int(pool_size * (STR_OBJECT_OVERHEAD_BYTES + payload) * _POOL_SLACK) + _POOL_FIXED_BYTES
 
 
 # A set slot (hash + pointer, at CPython's load factor) beyond the str object it holds.
@@ -567,7 +560,6 @@ __all__ = [
     "compute_payload_bounds",
     "detected_memory_bytes",
     "faker_payload_bound",
-    "faker_pool_bytes",
     "generated_lifecycle_terms",
     "generation_floor_bytes",
     "generation_floor_shortfall",

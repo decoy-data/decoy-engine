@@ -40,8 +40,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from decoy_engine import fileaccess
+from decoy_engine._execution_error import source_column_unrepresentable
 from decoy_engine.fileaccess import FileAccess, FileHandle, FileRequest, FileRole
 from decoy_engine.fileaccess.adapters import arrow as arrow_adapter
+from decoy_engine.internal.pandas_compat import arrow_to_frame
 from decoy_engine.profile._fixed_width_reader import (
     count_fixed_width_records,
     read_fixed_width_handle,
@@ -411,7 +413,9 @@ class ParquetFileSource(_PolicyBound):
         )
 
     def to_frame(self) -> pd.DataFrame:
-        return self._lazy().to_table().to_pandas()
+        return arrow_to_frame(
+            self._lazy().to_table(), on_unrepresentable=source_column_unrepresentable()
+        )
 
 
 @dataclass(frozen=True)
@@ -492,11 +496,13 @@ def head_frame_from_batches(
         if gathered >= sample_rows:
             break
     if not collected:
-        return schema.empty_table().to_pandas()
+        return arrow_to_frame(
+            schema.empty_table(), on_unrepresentable=source_column_unrepresentable()
+        )
     table = pa.Table.from_batches(collected)
     if table.num_rows > sample_rows:
         table = table.slice(0, sample_rows)
-    return table.to_pandas()
+    return arrow_to_frame(table, on_unrepresentable=source_column_unrepresentable())
 
 
 # ---------------------------------------------------------------------

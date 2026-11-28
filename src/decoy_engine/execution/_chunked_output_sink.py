@@ -148,7 +148,7 @@ class OutputPublish:
         """The sink when this run streams into it, else `None`."""
         return self.sink if self.is_open else None
 
-    def open(self) -> None:
+    def start_streaming(self) -> None:
         self.is_open = True
 
     def staged_components(self) -> list[str]:

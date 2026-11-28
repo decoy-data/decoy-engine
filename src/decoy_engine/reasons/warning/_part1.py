@@ -84,52 +84,52 @@ GEO_GENERALIZE_CASCADE = _d("geo_generalize_cascade", "Geo generalize cascade.")
 LEAK_CHECK_COLUMN_NOT_CHECKED = _d(
     "leak_check_column_not_checked",
     "A column that leak_check names was not checked, so the check says nothing about it.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 LEAK_CHECK_SKIP_BELOW_MIN_ROWS = _d(
     "leak_check_skip_below_min_rows",
     "leak_check skipped a column with fewer non-null cells than min_rows.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 LEAK_CHECK_SKIP_EXEMPT = _d(
     "leak_check_skip_exempt",
     "leak_check skipped a column the validator lists under params.exempt.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 LEAK_CHECK_SKIP_FK_CHILD = _d(
     "leak_check_skip_fk_child",
     "leak_check skipped a foreign-key child column; its values come from the parent.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 LEAK_CHECK_SKIP_MISSING_COLUMN = _d(
     "leak_check_skip_missing_column",
     "leak_check skipped a column that is missing from the output or the source.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 LEAK_CHECK_SKIP_PASSTHROUGH = _d(
     "leak_check_skip_passthrough",
     "leak_check skipped a column that keeps its source values by design.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 LEAK_CHECK_SKIP_TABLE_NOT_PRODUCED = _d(
     "leak_check_skip_table_not_produced",
     "leak_check skipped a table that this run did not produce.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 LEAK_CHECK_SKIP_WHEN = _d(
     "leak_check_skip_when",
     "leak_check skipped a column that carries a when predicate.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 VALIDATOR_SKIP_MISSING_COLUMN = _d(
     "validator_skip_missing_column",
     "A validator skipped a column that is missing from the table.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 VALIDATOR_SKIP_MISSING_TABLE = _d(
     "validator_skip_missing_table",
     "A validator skipped a table that this run did not produce.",
-    since=UNRELEASED,
+    since="1.35.0",
 )
 MIMESIS_LOCALE_FALLBACK = _d("mimesis_locale_fallback", "Mimesis locale fallback.")
 NATIVE_COMPANION_MISSING = _d(

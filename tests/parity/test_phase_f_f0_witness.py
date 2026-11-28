@@ -49,6 +49,7 @@ from decoy_engine.generation.pool._sampler import PoolSampler
 from tests.parity import _f0_fixtures as fx
 from tests.parity import _f0_witness as w
 from tests.parity._f0_canonical import table_fingerprint
+from tests.parity.support.pick_spy import count_picks
 
 
 def _companion() -> Any | None:
@@ -190,6 +191,55 @@ def test_real_threshold_pooled_fixture_is_numpy_selection(monkeypatch: pytest.Mo
         ("pooled", c): (_NUMPY, frozenset({w.POOL_CONSTRUCTION}))
         for c in ("city", "last", "street")
     }
+
+
+def _pooled_picks(monkeypatch: pytest.MonkeyPatch, config: dict[str, Any]) -> list[str]:
+    """The pick entry point of each outer pick, with the witness installed around the run."""
+    monkeypatch.setattr(_faker_pool, "N_THRESHOLD", _THRESHOLD)
+    with w.end_to_end(monkeypatch) as witness:
+        picks = count_picks(monkeypatch)
+        tables = fx.run_generate_tables(config)
+    witness.classify(tables)
+    return picks
+
+
+def test_an_ordinary_pooled_column_is_picked_through_take_under_the_witness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The witness wrapper hands the batch assembler the Arrow route, so a broken Arrow output
+    would reach the witness instead of silently taking the list route."""
+    table = fx.table("t", _ROWS, [{"name": "v", "type": "faker", "faker_type": "city"}])
+    assert _pooled_picks(monkeypatch, fx.config([table])) == ["take"]
+
+
+def test_a_collected_key_column_is_picked_through_select_under_the_witness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = fx.table("parent", _ROWS, [{"name": "k", "type": "faker", "faker_type": "city"}])
+    child_col = {
+        "name": "pk",
+        "type": "reference",
+        "reference_table": "parent",
+        "reference_column": "k",
+    }
+    config = fx.config([parent, fx.table("child", 10, [child_col])])
+    assert _pooled_picks(monkeypatch, config) == ["select"]
+
+
+def test_the_witness_labels_a_list_consumer_pooled_column_numpy_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_faker_pool, "N_THRESHOLD", _THRESHOLD)
+    parent = fx.table("parent", _ROWS, [{"name": "k", "type": "faker", "faker_type": "city"}])
+    child_col = {
+        "name": "pk",
+        "type": "reference",
+        "reference_table": "parent",
+        "reference_column": "k",
+    }
+    config = fx.config([parent, fx.table("child", 10, [child_col])])
+    reports = w.classify_columns(monkeypatch, lambda: fx.run_generate_tables(config))
+    assert reports[("parent", "k")].selection == _NUMPY
 
 
 def test_live_columns_never_report_pool_construction(monkeypatch: pytest.MonkeyPatch) -> None:

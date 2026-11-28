@@ -135,7 +135,9 @@ def test_translate_mixed_object_not_native_maps_to_coded_generation_error() -> N
     translated = _translate_compiled_kernel_error(exc)
     assert type(translated) is GenerationError
     assert translated.code == "native_type_not_admitted"
-    assert translated.message == "Arrow C Data Interface rejected the input: bad"
+    # The native detail is not copied: it formats the Arrow type, field names and metadata included.
+    assert "rejected the input" not in translated.message
+    assert translated.message == "the native kernel does not admit the input column type"
 
 
 def test_translate_passes_through_an_unrecognized_code_unchanged() -> None:
