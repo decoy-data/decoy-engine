@@ -114,6 +114,8 @@ GUARDED_MODULES: tuple[str, ...] = (
     "execution/_substrate.py",
     "execution/_runner.py",
     "execution/native/_dispatch.py",
+    "execution/native/chunked/_route_scan.py",
+    "execution/native/chunked/_oracle_route.py",
     "execution/native/_plan.py",
     "execution/native/_requirements.py",
     "execution/native/_capabilities.py",

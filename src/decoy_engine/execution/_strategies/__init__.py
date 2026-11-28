@@ -21,7 +21,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from decoy_engine.execution._adapter import StrategyHandler, StrategyInfo, StrategyOption
+from decoy_engine.contracts.strategy_requirements import SHAPE_REQUIREMENTS_BY_STRATEGY
+from decoy_engine.execution._adapter import (
+    StrategyHandler,
+    StrategyInfo,
+    StrategyOption,
+    StrategyShape,
+)
 from decoy_engine.execution._strategies._bucket_perturb import BucketPerturbStrategyHandler
 from decoy_engine.execution._strategies._bucketize import BucketizeStrategyHandler
 from decoy_engine.execution._strategies._categorical import CategoricalStrategyHandler
@@ -111,6 +117,16 @@ def _catalog_row(handler: StrategyHandler) -> StrategyInfo:
         raise TypeError(
             f"strategy handler {handler.name!r}: requires a namespace it does not declare"
         )
+    shaped = SHAPE_REQUIREMENTS_BY_STRATEGY.get(handler.name)
+    shape = (
+        None
+        if shaped is None
+        else StrategyShape(
+            family=shaped.family,
+            declaration=(None if shaped.requirement is None else ".".join(shaped.requirement.path)),
+            admitted=tuple(sorted(s.value for s in shaped.admitted)),
+        )
+    )
     return StrategyInfo(
         name=handler.name,
         namespace_required=declared["namespace_required"],
@@ -118,6 +134,7 @@ def _catalog_row(handler: StrategyHandler) -> StrategyInfo:
         options=options,
         offer_in_wizard=declared["offer_in_wizard"],
         requirements=requirements,
+        shape=shape,
     )
 
 
@@ -181,6 +198,7 @@ __all__ = [
     "ShuffleStrategyHandler",
     "StrategyInfo",
     "StrategyOption",
+    "StrategyShape",
     "TextMaskHandler",
     "TextRedactHandler",
     "TokenizeStrategyHandler",

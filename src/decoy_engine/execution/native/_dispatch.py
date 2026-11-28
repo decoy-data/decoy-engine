@@ -56,8 +56,6 @@ from decoy_engine.execution.native._chunk_masking import (  # noqa: F401 -- re-e
 )
 from decoy_engine.execution.native._chunk_schema import NativeChunkSchemaDriftError
 from decoy_engine.execution.native._chunked_group_key_gate import (
-    group_by_columns,
-    order_dependence_rejection,
     sibling_resident_sources,
 )
 from decoy_engine.execution.native._crypto_ext import (
@@ -99,6 +97,7 @@ from decoy_engine.execution.native._route_decline_codes import (
     table_decline,
 )
 from decoy_engine.execution.native._when_admission import first_when_decline
+from decoy_engine.execution.native.chunked._route_scan import scan_table_nodes
 from decoy_engine.generation.pool import PoolCache
 from decoy_engine.profile import DeclarationRequest
 from decoy_engine.verification.postmask._route_guard import refuse_unchecked_route
@@ -286,81 +285,30 @@ def _static_route_decision(
     # non-admitted table runs 100% on the oracle. Non-scalar nodes
     # (`<group>` / `<composite>`) have no single column to tag and stay out of
     # `node_routes`; their exclusion is recorded in `reroute_reason` instead.
-    reasons: list[str] = []
-    declines: list[RouteDeclineRecord] = []
-    scalar_columns: list[tuple[str, str]] = []
-    for node in table_nodes:
-        label = ",".join(node.columns) if node.columns else "?"
-        if node.kind != "scalar":
-            reasons.append(f"non_scalar_node:{node.kind}:{label}")
-            declines.append(table_decline(Decline.NON_SCALAR_NODE, table))
-            continue
-        column = node.columns[0]
-        scalar_columns.append((column, node.strategy))
-        if node.strategy in CHUNKED_ROUTE_VETOED_STRATEGIES:
-            # A strategy native on the full-frame route but vetoed on this chunked route
-            # would otherwise resolve fallback_policy == "native" and reach a missing chunk
-            # handler, so veto the whole table to the oracle here. The set is empty today;
-            # the reason carries the strategy so a future veto stays distinguishable.
-            reasons.append(f"{node.strategy}_not_native_chunked_route:{column}")
-            declines.append(column_decline(Decline.STRATEGY_VETOED_CHUNKED, table, column))
-            continue
-        if node.strategy == "group_key" and node.fallback_policy == "native":
-            # The sibling must reach group_key unmasked, or the native leg (which masks from
-            # the source chunk) would read a different value than the oracle.
-            group_by = group_by_columns(config, table).get(column)
-            order_reason = (
-                order_dependence_rejection(column, group_by, table_nodes) if group_by else None
-            )
-            if order_reason is not None:
-                reasons.append(order_reason)
-                self_anchor = group_by == column
-                declines.append(
-                    column_decline(
-                        Decline.GROUP_KEY_SELF_ANCHOR
-                        if self_anchor
-                        else Decline.GROUP_KEY_MASKED_SIBLING,
-                        table,
-                        column,
-                    )
-                )
-                continue
-        no_kernel = node.strategy not in NATIVE_KERNEL_STRATEGIES
-        no_pool_path = node.strategy not in NATIVE_POOL_STRATEGIES
-        # The seeded non-deterministic categorical and the non-deterministic REUSE faker resolve
-        # a non-native policy (the full-frame operators are source-keyed); this chunked-only
-        # route admits them, config only.
-        positional = chunked_positional_column(config, table, node.strategy, column)
-        if node.fallback_policy != "native" and not positional:
-            reasons.append(f"fallback_policy_not_native:{column}:{node.fallback_policy}")
-            declines.append(column_decline(Decline.FALLBACK_POLICY_NOT_NATIVE, table, column))
-        elif no_kernel and no_pool_path:
-            # Defense in depth (see module docstring): `fallback_policy` already
-            # encodes this via `_requirements.py`'s combined kernel-or-pool
-            # check, so this branch should be unreachable for an admitted
-            # node. Kept as a second, independent guard against the two
-            # allowlists drifting apart; a faker node satisfying JC-5 is in
-            # NATIVE_POOL_STRATEGIES, so it passes here alongside the
-            # compiled-kernel strategies.
-            reasons.append(f"no_native_kernel_or_pool:{column}:{node.strategy}")
-            declines.append(column_decline(Decline.NO_NATIVE_KERNEL_OR_POOL, table, column))
-
-    native_admitted = not reasons
+    scan = scan_table_nodes(
+        table_nodes,
+        config=config,
+        table=table,
+        vetoed_strategies=CHUNKED_ROUTE_VETOED_STRATEGIES,
+        kernel_strategies=NATIVE_KERNEL_STRATEGIES,
+        pool_strategies=NATIVE_POOL_STRATEGIES,
+    )
+    native_admitted = not scan.reasons
     node_routes = tuple(
         NodeRouteRecord(
             column=column,
             strategy=strategy,
             route=_route_tag_for(strategy) if native_admitted else "oracle",
         )
-        for column, strategy in scalar_columns
+        for column, strategy in scan.scalar_columns
     )
     return NativeRouteEvidence(
         table=table,
         native_admitted=native_admitted,
-        reroute_reason=None if native_admitted else "; ".join(reasons),
+        reroute_reason=None if native_admitted else "; ".join(scan.reasons),
         node_routes=node_routes,
         # Several composite nodes decline for the same table-wide cause; one record each is noise.
-        decline_records=tuple(dict.fromkeys(declines)),
+        decline_records=tuple(dict.fromkeys(scan.declines)),
     )
 
 

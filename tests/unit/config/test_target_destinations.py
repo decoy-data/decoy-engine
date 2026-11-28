@@ -20,7 +20,7 @@ from decoy_engine.config import (
     parse_pipeline_config,
 )
 from decoy_engine.config import _targets as targets_mod
-from decoy_engine.profiling._starter_config import _refuse_shared_destinations
+from decoy_engine.profiling._starter_targets import refuse_shared_destinations
 
 CODE = "target_shared_destination"
 CANARY = "CANARYVALUE"
@@ -132,7 +132,7 @@ def test_e8_the_refusal_carries_no_destination_value() -> None:
     assert {p.code for p in perr.value.problems} == {CODE}
     assert perr.value.__cause__ is None and perr.value.__context__ is None
     with pytest.raises(ValueError) as starter:
-        _refuse_shared_destinations(clash, list(clash))
+        refuse_shared_destinations(clash, list(clash))
     assert CANARY not in str(starter.value)
     assert reasons.find("config", CODE) is not None
 

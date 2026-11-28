@@ -60,11 +60,21 @@ def test_fixed_width_gives_the_fixed_width_backend(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "name",
-    ["a.csv.gz", "a.csv.bz2", "a.csv.zip", "a.csv.xz", "a.csv.zst", "a.CSV.GZ", "a.tar.gz"],
+    ("name", "codec"),
+    [
+        ("a.csv.gz", "gzip"),
+        ("a.csv.bz2", "bz2"),
+        ("a.csv.zip", "zip"),
+        ("a.csv.xz", "xz"),
+        ("a.csv.zst", "zstd"),
+        ("a.CSV.GZ", "gzip"),
+        ("a.tar.gz", "tar"),
+    ],
 )
-def test_a_compressed_csv_has_no_lazy_backend(tmp_path: Path, name: str) -> None:
-    assert build_lazy_source("t", _descriptor("csv", str(tmp_path / name))) is None
+def test_a_compressed_csv_gets_the_lazy_backend(tmp_path: Path, name: str, codec: str) -> None:
+    src = build_lazy_source("t", _descriptor("csv", str(tmp_path / name)))
+    assert isinstance(src, CsvLazySource)
+    assert src.compression == codec
 
 
 @pytest.mark.parametrize(

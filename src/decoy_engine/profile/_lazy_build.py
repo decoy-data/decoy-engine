@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from decoy_engine import fileaccess
 from decoy_engine._lexeme import LEXEME_KEY
-from decoy_engine.profile._csv_reader import csv_is_compressed, resolve_csv_dialect
+from decoy_engine.profile._csv_reader import resolve_csv_dialect
 from decoy_engine.profile._lazy_csv import CsvLazySource
 from decoy_engine.profile._lazy_fixed_width import FixedWidthLazySource
 from decoy_engine.profile._readers import (
@@ -88,12 +88,10 @@ def _resident_fixed_width(descriptor: dict[str, Any], field_key: str, table: str
 def _lazy_csv(
     table: str, descriptor: dict[str, Any], file_access: FileAccess | None
 ) -> LazySource | None:
-    path = descriptor_path(descriptor, f"sources.{table}.path")
-    # A lazy CSV read has no decompressing path, so a compressed file stays on the resident read.
-    if csv_is_compressed(path):
-        return None
+    field_key = f"sources.{table}.path"
+    descriptor_path(descriptor, field_key)  # validate only; the source builds from the descriptor
     return CsvLazySource.from_descriptor(
-        descriptor, table=table, file_access=file_access, field_key=f"sources.{table}.path"
+        descriptor, table=table, file_access=file_access, field_key=field_key
     )
 
 
@@ -108,7 +106,7 @@ def _lazy_fixed_width(
     table: str, descriptor: dict[str, Any], file_access: FileAccess | None
 ) -> LazySource | None:
     field_key = f"sources.{table}.path"
-    descriptor_path(descriptor, field_key)
+    descriptor_path(descriptor, field_key)  # validate only; the source builds from the descriptor
     _layout(descriptor, field_key)
     return FixedWidthLazySource.from_descriptor(
         descriptor, table=table, file_access=file_access, field_key=field_key
@@ -134,7 +132,7 @@ def build_lazy_source(
     """The lazy backend for config table `table`, or `None` when its source has none.
 
     Read under the config position `sources.<table>.path`, as `build_declared_source` is. `None`
-    covers a cloud descriptor, an unknown type or format, and a compressed CSV; the caller then
+    covers a cloud descriptor and an unknown type or format; the caller then
     keeps its resident read. Opens no data row."""
     if descriptor.get("type") != "file":
         return None

@@ -419,6 +419,21 @@ class StrategyOption:
 
 
 @dataclass(frozen=True)
+class StrategyShape:
+    """The column shapes a strategy reads, read from `SHAPE_REQUIREMENTS_BY_STRATEGY`.
+
+    `family` groups strategies that read the same kind of value (`date`, `number`). `declaration`
+    is the column-entry field path that says how to read a text column (`provider_config.date_format`
+    or `logical_type`), or None for a strategy that needs none. `admitted` is every shape the
+    strategy can read, as sorted shape names; any other known shape is refused at compile.
+    """
+
+    family: str
+    declaration: str | None
+    admitted: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class StrategyInfo:
     """What the catalog knows about one strategy."""
 
@@ -431,6 +446,8 @@ class StrategyInfo:
     offer_in_wizard: bool  # listed at the wizard's `edit` prompt
     # Settings the plan check refuses a column for omitting; the one mapping lives in plan/checks.
     requirements: tuple[StrategyRequirement, ...]
+    # The shapes it reads; None for a strategy the shape table does not govern.
+    shape: StrategyShape | None = None
 
     @property
     def required_options(self) -> tuple[str, ...]:

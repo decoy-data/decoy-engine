@@ -626,3 +626,24 @@ def test_a_deterministic_faker_column_maps_equal_inputs_to_equal_outputs(tmp_pat
     again = _run(entry, values, tmp_path, seed=1)["val"].to_pylist()
     assert out == again
     assert all(out[i] == out[i % 7] for i in range(70))
+
+
+def test_shape_matches_requirement_table() -> None:
+    """`StrategyInfo.shape` is read from `SHAPE_REQUIREMENTS_BY_STRATEGY`, the one table."""
+    from decoy_engine.contracts.strategy_requirements import SHAPE_REQUIREMENTS_BY_STRATEGY
+
+    rows = {row.name: row for row in strategy_catalog()}
+    assert set(SHAPE_REQUIREMENTS_BY_STRATEGY) <= set(rows)
+    for name, row in rows.items():
+        table = SHAPE_REQUIREMENTS_BY_STRATEGY.get(name)
+        if table is None:
+            assert row.shape is None, name
+            continue
+        assert row.shape is not None, name
+        assert row.shape.family == table.family
+        assert row.shape.admitted == tuple(sorted(s.value for s in table.admitted))
+        want = ".".join(table.requirement.path) if table.requirement is not None else None
+        assert row.shape.declaration == want
+    assert rows["date_shift"].shape.declaration == "provider_config.date_format"  # type: ignore[union-attr]
+    assert rows["bucketize"].shape.declaration == "logical_type"  # type: ignore[union-attr]
+    assert rows["fpe"].shape.declaration is None  # type: ignore[union-attr]

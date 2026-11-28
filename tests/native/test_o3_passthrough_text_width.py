@@ -29,6 +29,7 @@ from decoy_engine.execution import _chunked_output_sink as sink_mod
 from decoy_engine.execution._errors import ExecutionError
 from decoy_engine.execution._pipeline_auto_chunk import join_dispatcher_chunks
 from decoy_engine.execution.native import _chunked_entry
+from decoy_engine.execution.native.chunked import _oracle_route
 from decoy_engine.execution.out_of_core import _mask
 from decoy_engine.execution.out_of_core._batch_join import _resolve_output_types
 from decoy_engine.execution.out_of_core._mask import masked_output_type
@@ -104,9 +105,12 @@ def small_limit(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_o3a_run_mask_chunked_writes_string(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _spy(monkeypatch, _chunked_entry, "normalize_chunk")
+    # run_mask_chunked normalizes on whichever route the table takes: the native leg in
+    # _chunked_entry, or the oracle leg in _oracle_route (no companion installed).
+    native_calls = _spy(monkeypatch, _chunked_entry, "normalize_chunk")
+    oracle_calls = _spy(monkeypatch, _oracle_route, "normalize_chunk")
     got = _run("run_mask_chunked", split(_source(KEEP), 2))
-    assert calls
+    assert native_calls or oracle_calls
     assert {t.schema.field("keep").type for t in got} == {pa.string()}
     assert column_values(got, "keep") == KEEP
 

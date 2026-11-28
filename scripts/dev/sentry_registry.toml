@@ -269,12 +269,16 @@ baseline = "tests/sentry/baselines/group-by-single-reader.json"
 [[sentry]]
 id = "lossless-int-columns"
 baseline = "tests/sentry/baselines/lossless-int-columns.json"
+approved_growth = [
+  { key = "adapter_fk_safe_columns::execution/chunked/_oracle_step.py::oracle_chunk_step", decision = "owner 2026-11-15 ratchet 1:1 re-home rule; count unchanged at 17, old key gone; plan section 5" },
+]
 
 [[sentry]]
 id = "column-shape-classifier"
 baseline = "tests/sentry/baselines/column-shape-classifier.json"
 approved_growth = [
   { key = "observed_shape::profile/arrow/_walk_arrow.py", decision = "owner 2026-11-24 standing: re-home after the Arrow profiler move; same site" },
+  { key = "classify_column::profiling/scan_set.py", decision = "owner 2026-11-27 approved one new reviewed caller (plan names profiling/scan_set.py), question COLUMN-SHAPE-RULE--E5-ratchet" },
 ]
 
 [[sentry]]
