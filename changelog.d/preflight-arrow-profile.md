@@ -10,7 +10,10 @@ the failing date or time column from Arrow. A plain `run_pipeline` over such a f
 the coded `full_frame_value_unrepresentable`, and that error no longer chains the pyarrow error
 that quoted the value.
 
-A bounded profile of a Parquet file or a supplied table that still cannot be converted now
-fails with `bounded source profile failed (<label>)`, with no value, name or pyarrow text. The
+When the recovery does not apply, a column pandas cannot hold fails with the coded
+`source_column_unrepresentable` from the shared source read, in the profile and in
+`estimate_job_capacity`. Any other conversion failure in a bounded profile of a Parquet file or
+a supplied table now fails with `bounded source profile failed (<label>)`, with no value, name
+or pyarrow text. The
 profile's duplicate-column `ValueError` now says "table 't' has N duplicated field name(s)"
 without naming the columns.

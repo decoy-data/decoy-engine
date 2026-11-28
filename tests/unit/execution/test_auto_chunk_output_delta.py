@@ -15,8 +15,10 @@ things against the live code:
 
    (e) is the one failure-to-success change (PREFLIGHT-ARROW-PROFILE S1b, plan
    AT-1/2, AT-7 and Amendment 1): a `time64[ns]` source with sub-microsecond
-   values that the Parquet profile recovery accepts. Today's lane raises the coded
-   `full_frame_value_unrepresentable`; the dispatcher lane profiles, routes and
+   values that the Parquet profile recovery accepts. Today's lane raises a coded
+   error: `source_column_unrepresentable` from the first-chunk profile when the
+   first chunk holds a value (`none`), `full_frame_value_unrepresentable` from a
+   later chunk when it does not (`mixed`). The dispatcher lane profiles, routes and
    keeps `x` as the source column. It covers exactly the four cell ids in
    `RECOVERED_TIME64_CELLS`, with live checks of the values, the masked companions
    and today's exception.
@@ -48,14 +50,16 @@ from tests.unit.execution import _auto_chunk_support as support
 
 FIXTURE = Path(__file__).parent / "auto_chunk_fixtures" / "output_delta.json"
 STRING_OUTPUT_COLUMNS = ("h", "r")
-RECOVERED_CODE = "full_frame_value_unrepresentable"
-# Guarantee 3 (e): named cell by cell, never matched by pattern. The `date32` cells hold
-# representable dates and get no exception.
-RECOVERED_TIME64_CELLS = frozenset(
-    f"time64_ns_nonaligned|{role}|{nulls}"
+# Guarantee 3 (e): named cell by cell, never matched by pattern, each with the exact code
+# today's lane raises. The `date32` cells hold representable dates and get no exception.
+RECOVERED_TIME64_CELLS = {
+    f"time64_ns_nonaligned|{role}|{nulls}": code
     for role in ("pass", "uncfg")
-    for nulls in ("none", "mixed")
-)
+    for nulls, code in (
+        ("none", "source_column_unrepresentable"),
+        ("mixed", "full_frame_value_unrepresentable"),
+    )
+}
 CONTROL_TYPE = "time64_ns_aligned"
 
 
@@ -195,7 +199,8 @@ def _check_recovered_time64(
 ) -> None:
     """Guarantee 3 (e), checked on the live run and not on the record alone."""
     assert legacy is None, f"{cell}: today's lane no longer raises; (e) does not apply"
-    assert l_rec == {"exc": "ExecutionError", "code": RECOVERED_CODE}
+    code = RECOVERED_TIME64_CELLS[cell]
+    assert l_rec == {"exc": "ExecutionError", "code": code}
     assert disp is not None, f"{cell}: dispatcher lane must succeed on {route}"
     assert d_rec["mode"] == "chunked"
     assert disp.column_names == src.column_names
@@ -224,7 +229,7 @@ def _check_recovered_time64(
     with pytest.raises(ExecutionError) as caught:
         support.run_legacy(cfg, src)
     exc = caught.value
-    assert exc.code == RECOVERED_CODE
+    assert exc.code == code
     assert exc.__cause__ is None
     assert exc.__context__ is None
     text = str(exc)

@@ -604,9 +604,10 @@ def test_time64_ns_with_sub_microsecond_values_clears_the_profile_source(
 ) -> None:
     """PREFLIGHT-ARROW-PROFILE S1b (plan section 4, AT-1/2) recovers the bounded Parquet
     profile for this source, so the run no longer dies in profile with ArrowInvalid. It
-    now succeeds on the default and dispatcher-on calls, and the dispatcher-off call
-    reaches the full-frame ingest and fails with the coded error (AT-7), with no cause
-    or context that could carry a cell value."""
+    now succeeds on the default and dispatcher-on calls. The dispatcher-off call reads
+    the first chunk, which holds a sub-microsecond value, and the first-chunk profile
+    fails with the coded `source_column_unrepresentable`, with no cause or context that
+    could carry a cell value."""
     from decoy_engine.execution import run_pipeline
 
     arr = pa.array([i * 1000 + 7 for i in range(support.ROWS)], pa.time64("ns"))
@@ -623,5 +624,5 @@ def test_time64_ns_with_sub_microsecond_values_clears_the_profile_source(
             sources={support.TABLE: src},
             **support.run_kwargs(chunked_dispatcher_enabled=False),
         )
-    assert raised.value.code == "full_frame_value_unrepresentable"
+    assert raised.value.code == "source_column_unrepresentable"
     assert raised.value.__cause__ is None and raised.value.__context__ is None

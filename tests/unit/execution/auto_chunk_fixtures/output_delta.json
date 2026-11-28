@@ -33043,19 +33043,19 @@
  },
  "time64_ns_nonaligned|faker|mixed": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   }
  },
@@ -33069,7 +33069,7 @@
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
@@ -33181,19 +33181,19 @@
  },
  "time64_ns_nonaligned|hash|mixed": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   }
  },
@@ -33207,7 +33207,7 @@
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
@@ -33319,33 +33319,113 @@
  },
  "time64_ns_nonaligned|pass|mixed": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|pass|none": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
@@ -33457,19 +33537,39 @@
  },
  "time64_ns_nonaligned|redact|mixed": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "string",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   }
  },
@@ -33483,7 +33583,7 @@
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
@@ -33595,19 +33695,39 @@
  },
  "time64_ns_nonaligned|truncate|mixed": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "string",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   }
  },
@@ -33621,7 +33741,7 @@
    "exc": "ExecutionError"
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
@@ -33733,33 +33853,113 @@
  },
  "time64_ns_nonaligned|uncfg|mixed": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   }
  },
  "time64_ns_nonaligned|uncfg|none": {
   "disp_native": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "disp_oracle": {
-   "code": "source_column_unrepresentable",
-   "exc": "ExecutionError"
+   "columns": [
+    [
+     "h",
+     "string",
+     true,
+     false
+    ],
+    [
+     "r",
+     "string",
+     true,
+     false
+    ],
+    [
+     "x",
+     "time64[ns]",
+     true,
+     false
+    ]
+   ],
+   "mode": "chunked",
+   "schema_metadata": []
   },
   "full": {
-   "code": "source_column_unrepresentable",
+   "code": "full_frame_value_unrepresentable",
    "exc": "ExecutionError"
   },
   "legacy": {
